@@ -18,6 +18,7 @@ s32 Main(s32 ArgCount, char* Args[])
     TestTernaryConditional();
     TestPrefix();
     TestVariables();
+    TestReturn();
 
     return (0);
 }

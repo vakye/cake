@@ -9,6 +9,8 @@ typedef enum
 {
     NODE_KIND_NIL = 0,          // NOTE(vak): Data: None
 
+    NODE_KIND_RETURN,           // NOTE(vak): Data: Unary
+
     NODE_KIND_INTEGER,          // NOTE(vak): Data: Integer
     NODE_KIND_IDENTIFIER,       // NOTE(vak): Data: Identifier
 
@@ -250,10 +252,8 @@ local node_id Parse(void)
     return (First);
 }
 
-local node_id ParseStatement(void)
+local void ParseHandleSemicolon(void)
 {
-    node_id Node = ParseExpression();
-
     if (NextIfMatchToken(';'))
     {
     }
@@ -266,6 +266,22 @@ local node_id ParseStatement(void)
     {
         Println(StrLit("error: Expected ';' at end of statement"));
         Exit(1);
+    }
+}
+
+local node_id ParseStatement(void)
+{
+    node_id Node = 0;
+
+    if (NextIfMatchToken(TOKEN_KIND_RETURN))
+    {
+        Node = PushUnaryNode(NODE_KIND_RETURN, ParseExpression());
+        ParseHandleSemicolon();
+    }
+    else
+    {
+        Node = ParseExpression();
+        ParseHandleSemicolon();
     }
 
     return (Node);
@@ -560,6 +576,8 @@ local void PrintNode(node_id NodeID)
         #define DoTable(Kind, StringLit) \
             [Kind] = {StringLit, sizeof(StringLit) - 1}
 
+        DoTable(NODE_KIND_NIL, "Nil"),
+        DoTable(NODE_KIND_RETURN, "Return"),
         DoTable(NODE_KIND_INTEGER, "Integer"),
         DoTable(NODE_KIND_IDENTIFIER, "Identifier"),
         DoTable(NODE_KIND_ADD, "Add"),
@@ -602,7 +620,7 @@ local void PrintNode(node_id NodeID)
 
     switch (Kind)
     {
-        default: PrintNewLine(); break;
+        case NODE_KIND_NIL: PrintNewLine(); break;
 
         case NODE_KIND_INTEGER:
         {
@@ -616,6 +634,15 @@ local void PrintNode(node_id NodeID)
             Print(Data.Identifier.Name);
             Print(StrLit("'"));
             PrintNewLine();
+        } break;
+
+        case NODE_KIND_RETURN:
+        case NODE_KIND_NEGATE:
+        case NODE_KIND_BITWISE_NOT:
+        case NODE_KIND_LOGICAL_NOT:
+        {
+            PrintNewLine();
+            PrintNode(Data.Unary.Operand);
         } break;
 
         case NODE_KIND_ADD:

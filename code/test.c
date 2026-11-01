@@ -11,6 +11,7 @@ local void TestLogical(void);
 local void TestTernaryConditional(void);
 local void TestPrefix(void);
 local void TestVariables(void);
+local void TestReturn(void);
 
 ///////////////////////////////////////////////////////////
 // NOTE(vak): Implementation
@@ -166,5 +167,11 @@ local void TestVariables(void)
     TestCase(12,    StrLit("a = 5; b = 7; a + b;"));
     TestCase(-90,   StrLit("a = -(b = c = 10); a * b + c;"));
     TestCase(64,    StrLit("Hello = 10; World = 123 + Hello; Hello*2 + World/3 % 79;"));
+}
+
+local void TestReturn(void)
+{
+    TestCase(10,    StrLit("a = 10; b = 20; return a; b;"));
+    TestCase(30,    StrLit("a = 10; b = 20; return a + b; a - b;"));
 }
 

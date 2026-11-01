@@ -22,6 +22,8 @@ typedef enum
 
     TOKEN_KIND_DOUBLE_AMPERSAND,    // NOTE(vak): "&&"
     TOKEN_KIND_DOUBLE_BAR,          // NOTE(vak): "||"
+
+    TOKEN_KIND_RETURN,              // NOTE(vak): "return"
 } token_kind;
 
 local void          Tokenize(string Code);
@@ -153,7 +155,19 @@ local usize TokenizeIdentifier(usize Index)
 
     usize Size = Index - From;
 
-    PushToken(TOKEN_KIND_IDENTIFIER, From, Size);
+    string String = ViewString(Code, From, Size);
+    token_kind Kind = TOKEN_KIND_IDENTIFIER;
+
+    #define DoMatch(S, K) \
+        else if (AreStringsEqual(String, StrLit(S))) \
+            Kind = K;
+
+    if (0) {}
+    DoMatch("return", TOKEN_KIND_RETURN)
+
+    #undef DoMatch
+
+    PushToken(Kind, From, Size);
 
     return (Size);
 }

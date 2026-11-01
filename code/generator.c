@@ -17,6 +17,8 @@ local code_buffer Generate(node_id RootNodeID);
 // NOTE(vak): Implementation
 ///////////////////////////////////////////////////////////
 
+typedef u32 label_id;
+#define NIL_LABEL_ID (0)
 
 typedef struct
 {
@@ -25,12 +27,11 @@ typedef struct
 
 typedef struct
 {
-    usize LabelIndex;
     usize Offset;
+    label_id LabelID;
 } rel32;
 
 typedef u32 variable_id;
-
 #define NIL_VARIABLE_ID (0)
 
 typedef struct
@@ -44,6 +45,7 @@ typedef struct
 {
     u32 StackOffset;
     u32 StackSize;
+    label_id ReturnLabel;
 
     usize BufferUsed;
     u32 LabelCount;
@@ -58,7 +60,19 @@ typedef struct
 
 local generator_state Generator = {0};
 
-local u32 PushLabel(void)
+local label* GetLabel(label_id LabelID)
+{
+    if ((LabelID == 0) || (LabelID >= Generator.LabelCount))
+    {
+        Println(StrLit("error: Invalid label ID"));
+        Exit(1);
+    }
+
+    label* Label = Generator.Labels + LabelID;
+    return (Label);
+}
+
+local label_id PushLabel(void)
 {
     if (Generator.LabelCount == ArrayCount(Generator.Labels))
     {
@@ -66,27 +80,18 @@ local u32 PushLabel(void)
         Exit(1);
     }
 
-    u32 LabelIndex = Generator.LabelCount++;
-    label* Label = Generator.Labels + LabelIndex;
+    label_id LabelID = Generator.LabelCount++;
+    label* Label = GetLabel(LabelID);
 
     Label->Offset = USizeMax;
 
-    return (LabelIndex);
+    return (LabelID);
 }
 
-local void PlaceLabelHere(u32 LabelIndex)
+local void PlaceLabelHere(label_id LabelID)
 {
-    if (LabelIndex < Generator.LabelCount)
-    {
-        label* Label = Generator.Labels + LabelIndex;
-
-        Label->Offset = Generator.BufferUsed;
-    }
-    else
-    {
-        Println(StrLit("error: Invalid label index"));
-        Exit(1);
-    }
+    label* Label = GetLabel(LabelID);
+    Label->Offset = Generator.BufferUsed;
 }
 
 local void EmitBytes(void* Data, usize Size)
@@ -117,11 +122,11 @@ local void Emit48(u64 Value) { EmitBytes(&Value, 6); }
 local void Emit56(u64 Value) { EmitBytes(&Value, 7); }
 local void Emit64(u64 Value) { EmitBytes(&Value, 8); }
 
-local void EmitRel32(u32 LabelIndex)
+local void EmitRel32(label_id LabelID)
 {
-    if (LabelIndex >= Generator.LabelCount)
+    if ((LabelID == 0) || (LabelID >= Generator.LabelCount))
     {
-        Println(StrLit("error: Invalid label index"));
+        Println(StrLit("error: Invalid label ID"));
         Exit(1);
     }
 
@@ -133,8 +138,8 @@ local void EmitRel32(u32 LabelIndex)
 
     rel32* Rel32 = Generator.Rel32 + Generator.Rel32Count++;
 
-    Rel32->LabelIndex = LabelIndex;
     Rel32->Offset = Generator.BufferUsed;
+    Rel32->LabelID = LabelID;
 
     Emit32(0x00000000);
 }
@@ -238,6 +243,16 @@ local void GenerateNode(node_id NodeID)
     switch (Kind)
     {
         default: break;
+
+        case NODE_KIND_RETURN:
+        {
+            GenerateNode(Data.Unary.Operand);
+
+            // NOTE(vak):
+            // e9 (Rel32)       jmp ReturnLabel
+            Emit8(0xe9);
+            EmitRel32(Generator.ReturnLabel);
+        } break;
 
         case NODE_KIND_NEGATE:
         {
@@ -425,7 +440,7 @@ local void GenerateNode(node_id NodeID)
 
         case NODE_KIND_LOGICAL_AND:
         {
-            u32 SkipRightLabel = PushLabel();
+            label_id SkipRightLabel = PushLabel();
 
             GenerateNode(Data.Binary.Left);
 
@@ -451,7 +466,7 @@ local void GenerateNode(node_id NodeID)
 
         case NODE_KIND_LOGICAL_OR:
         {
-            u32 SkipRightLabel = PushLabel();
+            label_id SkipRightLabel = PushLabel();
 
             GenerateNode(Data.Binary.Left);
 
@@ -477,8 +492,8 @@ local void GenerateNode(node_id NodeID)
 
         case NODE_KIND_TERNARY_CONDITIONAL:
         {
-            u32 ElseLabel = PushLabel();
-            u32 SkipElseLabel = PushLabel();
+            label_id ElseLabel = PushLabel();
+            label_id SkipElseLabel = PushLabel();
 
             GenerateNode(Data.Ternary.Left);
 
@@ -531,10 +546,12 @@ local code_buffer Generate(node_id RootNodeID)
     Generator.StackOffset = 0;
     Generator.StackSize = 0;
 
-    Generator.LabelCount = 0;
+    Generator.LabelCount = 1;
     Generator.Rel32Count = 0;
     Generator.VariableCount = 1;
     Generator.BufferUsed = 0;
+
+    Generator.ReturnLabel = PushLabel();
 
     // NOTE(vak): Prologue
     // 55                   push rbp
@@ -555,6 +572,7 @@ local code_buffer Generate(node_id RootNodeID)
     // 5d           pop rbp
     // c3           ret
 
+    PlaceLabelHere(Generator.ReturnLabel);
     Emit40(0xc35de58b48);
 
     Generator.StackSize = AlignUp(Generator.StackSize, 16);
@@ -572,7 +590,7 @@ local code_buffer Generate(node_id RootNodeID)
     for (usize Index = 0; Index < Generator.Rel32Count; Index++)
     {
         rel32* Rel32 = Generator.Rel32 + Index;
-        label* Label = Generator.Labels + Rel32->LabelIndex;
+        label* Label = GetLabel(Rel32->LabelID);
 
         if (Label->Offset == USizeMax)
         {
