@@ -146,8 +146,12 @@ local void EmitRel32(label_id LabelID)
 
 local variable* GetVariable(variable_id VariableID)
 {
+    int A = 0;
+
     if ((VariableID == 0) || (VariableID >= Generator.VariableCount))
     {
+        int A = 1;
+
         Println(StrLit("error: Invalid variable ID"));
         Exit(1);
     }
@@ -160,7 +164,7 @@ local variable_id LookupVariable(string Name)
 {
     variable_id ID = 0;
 
-    for (variable_id ScanID = 1; ScanID < Generator.VariableCount; ScanID++)
+    for (ssize ScanID = (ssize)Generator.VariableCount - 1; ScanID > 0; ScanID--)
     {
         variable* Variable = GetVariable(ScanID);
 
@@ -242,7 +246,57 @@ local void GenerateNode(node_id NodeID)
 
     switch (Kind)
     {
-        default: break;
+        case NODE_KIND_NIL:
+        {
+            Println(StrLit("error: encountered nil node when generating"));
+            Exit(1);
+        } break;
+
+        case NODE_KIND_BLOCK:
+        {
+            usize SavedStackOffset = Generator.StackOffset;
+            usize SavedVariableCount = Generator.VariableCount;
+
+            GenerateNode(Data.Block.First);
+
+            Generator.VariableCount = SavedVariableCount;
+            Generator.StackOffset = SavedStackOffset;
+        } break;
+
+        case NODE_KIND_IF:
+        {
+            label_id ElseLabel = PushLabel();
+
+            GenerateNode(Data.If.Cond);
+
+            // NOTE(vak):
+            // 48 85 c0         test rax, rax
+            // 0f 84 (Rel32)    jz ElseLabel
+
+            Emit40(0x840fc08548);
+            EmitRel32(ElseLabel);
+
+            GenerateNode(Data.If.Then);
+
+            if (Data.If.Else)
+            {
+                label_id SkipElseLabel = PushLabel();
+
+                // NOTE(vak):
+                // e9 (Rel32)       jmp SkipElseLabel
+
+                Emit8(0xe9);
+                EmitRel32(SkipElseLabel);
+
+                PlaceLabelHere(ElseLabel);
+                GenerateNode(Data.If.Else);
+                PlaceLabelHere(SkipElseLabel);
+            }
+            else
+            {
+                PlaceLabelHere(ElseLabel);
+            }
+        } break;
 
         case NODE_KIND_RETURN:
         {

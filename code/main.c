@@ -19,6 +19,7 @@ s32 Main(s32 ArgCount, char* Args[])
     TestPrefix();
     TestVariables();
     TestReturn();
+    TestIf();
 
     return (0);
 }

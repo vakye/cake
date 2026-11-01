@@ -10,6 +10,9 @@ typedef enum
     NODE_KIND_NIL = 0,          // NOTE(vak): Data: None
 
     NODE_KIND_RETURN,           // NOTE(vak): Data: Unary
+    NODE_KIND_IF,               // NOTE(vak): Data: If
+
+    NODE_KIND_BLOCK,            // NOTE(vak): Data: Block
 
     NODE_KIND_INTEGER,          // NOTE(vak): Data: Integer
     NODE_KIND_IDENTIFIER,       // NOTE(vak): Data: Identifier
@@ -61,11 +64,14 @@ typedef struct
         struct { node_id Operand; }             Unary;
         struct { node_id Left, Right; }         Binary;
         struct { node_id Left, Middle, Right; } Ternary;
+        struct { node_id Cond, Then, Else; }    If;
+        struct { node_id First; }               Block;
     };
 } node_data;
 
 local node_id Parse(void);
 
+local node_id ParseBlock(void);
 local node_id ParseStatement(void);
 local node_id ParseExpression(void);
 local node_id ParseAssignment(void);
@@ -195,6 +201,28 @@ local node_id PushTernaryNode(node_kind Kind, node_id Left, node_id Middle, node
     return (NodeID);
 }
 
+local node_id PushIfNode(node_id Cond, node_id Then, node_id Else)
+{
+    node_id NodeID = PushNode(NODE_KIND_IF);
+    node* Node = GetNode(NodeID);
+
+    Node->Data.If.Cond = Cond;
+    Node->Data.If.Then = Then;
+    Node->Data.If.Else = Else;
+
+    return (NodeID);
+}
+
+local node_id PushBlockNode(node_id First)
+{
+    node_id NodeID = PushNode(NODE_KIND_BLOCK);
+    node* Node = GetNode(NodeID);
+
+    Node->Data.Block.First = First;
+
+    return (NodeID);
+}
+
 local void NextToken(void)
 {
     if (Parser.TokenIndex == GetTokenCount())
@@ -252,19 +280,58 @@ local node_id Parse(void)
     return (First);
 }
 
-local void ParseHandleSemicolon(void)
+local node_id ParseBlock(void)
+{
+    if (!NextIfMatchToken('{'))
+    {
+        Println(StrLit("error: Expected '{' at start of block."));
+        Exit(1);
+    }
+
+    node_id First = 0;
+    node_id Last = 0;
+
+    while (!MatchToken(TOKEN_KIND_EOF) && !MatchToken('}'))
+    {
+        node_id Node = ParseStatement();
+        if (!Node) continue;
+
+        if (!First)
+        {
+            First = Node;
+            Last = Node;
+        }
+        else
+        {
+            node* LastNode = GetNode(Last);
+
+            LastNode->Data.Next = Node;
+            Last = Node;
+        }
+    }
+
+    if (!NextIfMatchToken('}'))
+    {
+        Println(StrLit("error: Expected '}' at end of block."));
+        Exit(1);
+    }
+
+    node_id Node = 0;
+
+    if (First)
+        Node = PushBlockNode(First);
+
+    return (Node);
+}
+
+local void ParseExpectSkipSemicolon(void)
 {
     if (NextIfMatchToken(';'))
     {
     }
-    else if (MatchToken(')'))
-    {
-        Println(StrLit("error: Missing matching '('"));
-        Exit(1);
-    }
     else
     {
-        Println(StrLit("error: Expected ';' at end of statement"));
+        Println(StrLit("error: Syntax error"));
         Exit(1);
     }
 }
@@ -276,12 +343,40 @@ local node_id ParseStatement(void)
     if (NextIfMatchToken(TOKEN_KIND_RETURN))
     {
         Node = PushUnaryNode(NODE_KIND_RETURN, ParseExpression());
-        ParseHandleSemicolon();
+        ParseExpectSkipSemicolon();
+    }
+    else if (NextIfMatchToken(TOKEN_KIND_IF))
+    {
+        if (!NextIfMatchToken('('))
+        {
+            Println(StrLit("error: Expected '(' before 'if' condition."));
+            Exit(1);
+        }
+
+        node_id Cond = ParseExpression();
+
+        if (!NextIfMatchToken(')'))
+        {
+            Println(StrLit("error: Expected ')' after 'if' condition."));
+            Exit(1);
+        }
+
+        node_id Then = ParseStatement();
+        node_id Else = 0;
+
+        if (NextIfMatchToken(TOKEN_KIND_ELSE))
+            Else = ParseStatement();
+
+        Node = PushIfNode(Cond, Then, Else);
+    }
+    else if (MatchToken('{'))
+    {
+        Node = ParseBlock();
     }
     else
     {
         Node = ParseExpression();
-        ParseHandleSemicolon();
+        ParseExpectSkipSemicolon();
     }
 
     return (Node);
@@ -578,6 +673,8 @@ local void PrintNode(node_id NodeID)
 
         DoTable(NODE_KIND_NIL, "Nil"),
         DoTable(NODE_KIND_RETURN, "Return"),
+        DoTable(NODE_KIND_IF, "If"),
+        DoTable(NODE_KIND_BLOCK, "Block"),
         DoTable(NODE_KIND_INTEGER, "Integer"),
         DoTable(NODE_KIND_IDENTIFIER, "Identifier"),
         DoTable(NODE_KIND_ADD, "Add"),
@@ -621,6 +718,20 @@ local void PrintNode(node_id NodeID)
     switch (Kind)
     {
         case NODE_KIND_NIL: PrintNewLine(); break;
+
+        case NODE_KIND_IF:
+        {
+            PrintNewLine();
+            PrintNode(Data.If.Cond);
+            PrintNode(Data.If.Then);
+            PrintNode(Data.If.Else);
+        } break;
+
+        case NODE_KIND_BLOCK:
+        {
+            PrintNewLine();
+            PrintNode(Data.Block.First);
+        } break;
 
         case NODE_KIND_INTEGER:
         {
@@ -680,5 +791,7 @@ local void PrintNode(node_id NodeID)
     }
 
     Depth--;
+
+    PrintNode(Data.Next);
 }
 

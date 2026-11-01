@@ -24,6 +24,8 @@ typedef enum
     TOKEN_KIND_DOUBLE_BAR,          // NOTE(vak): "||"
 
     TOKEN_KIND_RETURN,              // NOTE(vak): "return"
+    TOKEN_KIND_IF,                  // NOTE(vak): "if"
+    TOKEN_KIND_ELSE,                // NOTE(vak): "else"
 } token_kind;
 
 local void          Tokenize(string Code);
@@ -163,7 +165,9 @@ local usize TokenizeIdentifier(usize Index)
             Kind = K;
 
     if (0) {}
-    DoMatch("return", TOKEN_KIND_RETURN)
+    DoMatch("return",   TOKEN_KIND_RETURN)
+    DoMatch("if",       TOKEN_KIND_IF)
+    DoMatch("else",     TOKEN_KIND_ELSE)
 
     #undef DoMatch
 

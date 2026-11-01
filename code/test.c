@@ -12,6 +12,7 @@ local void TestTernaryConditional(void);
 local void TestPrefix(void);
 local void TestVariables(void);
 local void TestReturn(void);
+local void TestIf(void);
 
 ///////////////////////////////////////////////////////////
 // NOTE(vak): Implementation
@@ -173,5 +174,12 @@ local void TestReturn(void)
 {
     TestCase(10,    StrLit("a = 10; b = 20; return a; b;"));
     TestCase(30,    StrLit("a = 10; b = 20; return a + b; a - b;"));
+}
+
+local void TestIf(void)
+{
+    TestCase(50,    StrLit("a = 10; if (a < 20) { return 50; } else return 20;"));
+    TestCase(30,    StrLit("a = 10; if (a > 20) { return 50; } return 30;"));
+    TestCase(30,    StrLit("a = 10; if (a + 20 > 80) { return 10; } else if (a + 10 < 100) return 30; else return 20;"));
 }
 
