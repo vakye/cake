@@ -17,13 +17,10 @@ typedef enum
     NODE_KIND_WHILE,            // NOTE(vak): Data: While
     NODE_KIND_DO_WHILE,         // NOTE(vak): Data: While
 
-    NODE_KIND_DECLARE,          // NOTE(vak): Data: Declare
-
     NODE_KIND_BLOCK,            // NOTE(vak): Data: Block
-    NODE_KIND_STMT_LIST,        // NOTE(vak): Data: Block
 
     NODE_KIND_INTEGER,          // NOTE(vak): Data: Integer
-    NODE_KIND_IDENTIFIER,       // NOTE(vak): Data: Identifier
+    NODE_KIND_VARIABLE,         // NOTE(vak): Data: Variable
 
     NODE_KIND_NEGATE,           // NOTE(vak): Data: Unary
     NODE_KIND_LOGICAL_NOT,      // NOTE(vak): Data: Unary
@@ -65,6 +62,9 @@ typedef u32 node_id;
 
 #define NIL_NODE_ID (0)
 
+typedef u32 variable_id;
+#define NIL_VARIABLE_ID (0)
+
 typedef struct
 {
     node_id Next;
@@ -72,11 +72,10 @@ typedef struct
     union
     {
         struct { usize Value; }                     Integer;
-        struct { string Name; }                     Identifier;
+        struct { usize StackOffset; }               Variable;
         struct { node_id Operand; }                 Unary;
         struct { node_id Left, Right; }             Binary;
         struct { node_id Left, Middle, Right; }     Ternary;
-        struct { string Name; }                     Declare;
         struct { node_id Cond, Then, Else; }        If;
         struct { node_id Init, Cond, Post, Body; }  For;
         struct { node_id Cond, Body; }              While;
@@ -110,6 +109,8 @@ local node_id ParsePrimary(void);
 local node_kind GetNodeKind(node_id NodeID);
 local node_data GetNodeData(node_id NodeID);
 
+local usize GetStackSize(void);
+
 local void PrintNode(node_id NodeID);
 
 ///////////////////////////////////////////////////////////
@@ -124,9 +125,21 @@ typedef struct
 
 typedef struct
 {
+    string Name;
+    usize StackOffset;
+} variable;
+
+typedef struct
+{
+    usize StackOffset;
+    usize StackSize;
+
     u32 TokenIndex;
     u32 NodeCount;
+    u32 VariableCount;
+
     node Nodes[4096];
+    variable Variables[4096];
 } parser_state;
 
 local parser_state Parser = {0};
@@ -175,12 +188,87 @@ local node_id PushIntegerNode(usize Value)
     return (NodeID);
 }
 
-local node_id PushIdentifierNode(string Name)
+local variable* GetVariable(variable_id ID)
 {
-    node_id NodeID = PushNode(NODE_KIND_IDENTIFIER);
+    if ((ID == 0) || (ID > Parser.VariableCount))
+    {
+        Println(StrLit("error: Invalid variable ID."));
+        Exit(1);
+    }
+
+    variable* Variable = Parser.Variables + ID;
+    return (Variable);
+}
+
+local variable_id LookupVariable(string Name)
+{
+    variable_id ID = 0;
+
+    for (variable_id ScanID = 1; ScanID < Parser.VariableCount; ScanID++)
+    {
+        variable* Variable = GetVariable(ScanID);
+
+        if (AreStringsEqual(Variable->Name, Name))
+        {
+            ID = ScanID;
+            break;
+        }
+    }
+
+    return (ID);
+}
+
+local variable_id DeclareVariable(string Name)
+{
+    if (Parser.VariableCount == ArrayCount(Parser.Variables))
+    {
+        Println(StrLit("error: Too many variables (count exceed 4096)."));
+        Exit(1);
+    }
+
+    variable_id ID = Parser.VariableCount++;
+    variable* Variable = GetVariable(ID);
+
+    Parser.StackOffset += 8;
+    Parser.StackSize = Maximum(Parser.StackSize, Parser.StackOffset);
+
+    Variable->Name = Name;
+    Variable->StackOffset = Parser.StackOffset;
+
+    return (ID);
+}
+
+typedef struct
+{
+    usize SavedVariableCount;
+    usize SavedStackOffset;
+} scope;
+
+local scope BeginScope(void)
+{
+    scope Result =
+    {
+        .SavedVariableCount = Parser.VariableCount,
+        .SavedStackOffset = Parser.StackOffset,
+    };
+
+    return (Result);
+}
+
+local void EndScope(scope Scope)
+{
+    Parser.VariableCount = Scope.SavedVariableCount;
+    Parser.StackOffset = Scope.SavedStackOffset;
+}
+
+local node_id PushVariableNode(variable_id ID)
+{
+    node_id NodeID = PushNode(NODE_KIND_VARIABLE);
     node* Node = GetNode(NodeID);
 
-    Node->Data.Identifier.Name = Name;
+    variable* Variable = GetVariable(ID);
+
+    Node->Data.Variable.StackOffset = Variable->StackOffset;
 
     return (NodeID);
 }
@@ -214,16 +302,6 @@ local node_id PushTernaryNode(node_kind Kind, node_id Left, node_id Middle, node
     Node->Data.Ternary.Left = Left;
     Node->Data.Ternary.Middle = Middle;
     Node->Data.Ternary.Right = Right;
-
-    return (NodeID);
-}
-
-local node_id PushDeclareNode(string Name)
-{
-    node_id NodeID = PushNode(NODE_KIND_DECLARE);
-    node* Node = GetNode(NodeID);
-
-    Node->Data.Declare.Name = Name;
 
     return (NodeID);
 }
@@ -275,22 +353,23 @@ local node_id PushDoWhileNode(node_id Cond, node_id Body)
     return (NodeID);
 }
 
-local node_id PushStmtListNode(node_id First)
+local node_id PushBlockNode(node_id First, node_id Last)
 {
-    node_id NodeID = PushNode(NODE_KIND_STMT_LIST);
-    node* Node = GetNode(NodeID);
+    node_id NodeID = 0;
 
-    Node->Data.Block.First = First;
-
-    return (NodeID);
-}
-
-local node_id PushBlockNode(node_id First)
-{
-    node_id NodeID = PushNode(NODE_KIND_BLOCK);
-    node* Node = GetNode(NodeID);
-
-    Node->Data.Block.First = First;
+    if (First)
+    {
+        if (First == Last)
+        {
+            NodeID = First;
+        }
+        else
+        {
+            NodeID = PushNode(NODE_KIND_BLOCK);
+            node* Node = GetNode(NodeID);
+            Node->Data.Block.First = First;
+        }
+    }
 
     return (NodeID);
 }
@@ -342,8 +421,12 @@ local void ExpectAndSkipToken(token_kind Kind, string ErrorMessage)
 
 local node_id Parse(void)
 {
+    Parser.StackOffset = 0;
+    Parser.StackSize = 0;
+
     Parser.TokenIndex = 0;
     Parser.NodeCount = 1;
+    Parser.VariableCount = 1;
 
     node_id First = 0;
     node_id Last = 0;
@@ -377,6 +460,8 @@ local node_id ParseBlock(void)
     node_id First = 0;
     node_id Last = 0;
 
+    scope Scope = BeginScope();
+
     while (!MatchToken(TOKEN_KIND_EOF) && !MatchToken('}'))
     {
         node_id Node = ParseStatement();
@@ -398,10 +483,9 @@ local node_id ParseBlock(void)
 
     ExpectAndSkipToken('}', StrLit("error: Expected '}' at end of block."));
 
-    node_id Node = 0;
+    node_id Node = PushBlockNode(First, Last);
 
-    if (First)
-        Node = PushBlockNode(First);
+    EndScope(Scope);
 
     return (Node);
 }
@@ -424,29 +508,45 @@ local node_id ParseDecl(void)
         {
             ExpectToken(TOKEN_KIND_IDENTIFIER, StrLit("error: Invalid variable name"));
 
-            node_id ParsedNode = PushDeclareNode(GetTokenString(Parser.TokenIndex));
+            string Name = GetTokenString(Parser.TokenIndex);
 
             NextToken();
 
+            variable_id VariableID = LookupVariable(Name);
+
+            if (VariableID)
+            {
+                Println(StrLit("error: Variable with same name already declared."));
+                Exit(1);
+            }
+
+            VariableID = DeclareVariable(Name);
+
+            node_id AssignNode = 0;
+
             if (NextIfMatchToken('='))
             {
-                ParsedNode = PushBinaryNode(NODE_KIND_ASSIGN, ParsedNode, ParseExpressionNoComma());
+                node_id VariableNode = PushVariableNode(VariableID);
+                AssignNode = PushBinaryNode(NODE_KIND_ASSIGN, VariableNode, ParseExpressionNoComma());
             }
+
+            if (!AssignNode)
+                continue;
 
             if (!First)
             {
-                First = ParsedNode;
-                Last = ParsedNode;
+                First = AssignNode;
+                Last = AssignNode;
             }
             else
             {
                 node* LastNode = GetNode(Last);
-                LastNode->Data.Next = ParsedNode;
-                Last = ParsedNode;
+                LastNode->Data.Next = AssignNode;
+                Last = AssignNode;
             }
         } while (NextIfMatchToken(','));
 
-        Node = PushStmtListNode(First);
+        Node = PushBlockNode(First, Last);
 
         ParseExpectSkipSemicolon();
     }
@@ -485,6 +585,8 @@ local node_id ParseStatement(void)
     }
     else if (NextIfMatchToken(TOKEN_KIND_FOR))
     {
+        scope Scope = BeginScope();
+
         ExpectAndSkipToken('(', StrLit("error: Expected '(' before for loop specifier"));
 
         node_id Init = ParseDecl();
@@ -506,6 +608,8 @@ local node_id ParseStatement(void)
         node_id Body = ParseStatement();
 
         Node = PushForNode(Init, Cond, Post, Body);
+
+        EndScope(Scope);
     }
     else if (NextIfMatchToken(TOKEN_KIND_WHILE))
     {
@@ -588,15 +692,7 @@ local node_id ParseComma(void)
         }
     } while (NextIfMatchToken(','));
 
-    node_id Node = 0;
-
-    if (First)
-    {
-        if (First == Last)
-            Node = First;
-        else
-            Node = PushStmtListNode(First);
-    }
+    node_id Node = PushBlockNode(First, Last);
 
     return (Node);
 }
@@ -878,7 +974,15 @@ local node_id ParsePrimary(void)
     }
     else if (MatchToken(TOKEN_KIND_IDENTIFIER))
     {
-        Node = PushIdentifierNode(GetTokenString(Parser.TokenIndex));
+        variable_id ID = LookupVariable(GetTokenString(Parser.TokenIndex));
+
+        if (!ID)
+        {
+            Println(StrLit("error: Undeclared/unknown variable."));
+            Exit(1);
+        }
+
+        Node = PushVariableNode(ID);
         NextToken();
     }
     else if (NextIfMatchToken('('))
@@ -915,6 +1019,11 @@ local node_data GetNodeData(node_id NodeID)
     return (Node->Data);
 }
 
+local usize GetStackSize(void)
+{
+    return (Parser.StackSize);
+}
+
 local void PrintNode(node_id NodeID)
 {
     if (!NodeID) return;
@@ -934,7 +1043,6 @@ local void PrintNode(node_id NodeID)
             [Kind] = {StringLit, sizeof(StringLit) - 1}
 
         DoTable(NODE_KIND_NIL, "Nil"),
-        DoTable(NODE_KIND_DECLARE, "Declare"),
         DoTable(NODE_KIND_RETURN, "Return"),
         DoTable(NODE_KIND_IF, "If"),
         DoTable(NODE_KIND_FOR, "For"),
@@ -943,9 +1051,8 @@ local void PrintNode(node_id NodeID)
         DoTable(NODE_KIND_CONTINUE, "Continue"),
         DoTable(NODE_KIND_BREAK, "Break"),
         DoTable(NODE_KIND_BLOCK, "Block"),
-        DoTable(NODE_KIND_STMT_LIST, "StmtList"),
         DoTable(NODE_KIND_INTEGER, "Integer"),
-        DoTable(NODE_KIND_IDENTIFIER, "Identifier"),
+        DoTable(NODE_KIND_VARIABLE, "Variable"),
         DoTable(NODE_KIND_NEGATE, "Negate"),
         DoTable(NODE_KIND_LOGICAL_NOT, "LogicalNot"),
         DoTable(NODE_KIND_BITWISE_NOT, "BitwiseNot"),
@@ -1000,12 +1107,6 @@ local void PrintNode(node_id NodeID)
             PrintNewLine();
         } break;
 
-        case NODE_KIND_DECLARE:
-        {
-            Print(Data.Declare.Name);
-            PrintNewLine();
-        } break;
-
         case NODE_KIND_IF:
         {
             PrintNewLine();
@@ -1031,7 +1132,6 @@ local void PrintNode(node_id NodeID)
             PrintNode(Data.While.Body);
         } break;
 
-        case NODE_KIND_STMT_LIST:
         case NODE_KIND_BLOCK:
         {
             PrintNewLine();
@@ -1044,11 +1144,10 @@ local void PrintNode(node_id NodeID)
             PrintNewLine();
         } break;
 
-        case NODE_KIND_IDENTIFIER:
+        case NODE_KIND_VARIABLE:
         {
-            Print(StrLit("'"));
-            Print(Data.Identifier.Name);
-            Print(StrLit("'"));
+            Print(StrLit("StackOffset="));
+            PrintUSize(Data.Variable.StackOffset);
             PrintNewLine();
         } break;
 

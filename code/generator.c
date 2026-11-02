@@ -31,20 +31,8 @@ typedef struct
     label_id LabelID;
 } rel32;
 
-typedef u32 variable_id;
-#define NIL_VARIABLE_ID (0)
-
 typedef struct
 {
-    string Name;
-    usize StackOffset;
-    // NOTE(vak): Size is currently assumed to be 8 bytes
-} variable;
-
-typedef struct
-{
-    u32 StackOffset;
-    u32 StackSize;
     label_id ReturnLabel;
     label_id BreakLabel;
     label_id ContinueLabel;
@@ -52,12 +40,10 @@ typedef struct
     usize BufferUsed;
     u32 LabelCount;
     u32 Rel32Count;
-    u32 VariableCount;
 
     u8 Buffer[65536];
     label Labels[4096];
     rel32 Rel32[4096];
-    variable Variables[4096];
 } generator_state;
 
 local generator_state Generator = {0};
@@ -146,66 +132,6 @@ local void EmitRel32(label_id LabelID)
     Emit32(0x00000000);
 }
 
-local variable* GetVariable(variable_id VariableID)
-{
-    int A = 0;
-
-    if ((VariableID == 0) || (VariableID >= Generator.VariableCount))
-    {
-        int A = 1;
-
-        Println(StrLit("error: Invalid variable ID"));
-        Exit(1);
-    }
-
-    variable* Variable = Generator.Variables + VariableID;
-    return (Variable);
-}
-
-local variable_id LookupVariable(string Name)
-{
-    variable_id ID = 0;
-
-    for (ssize ScanID = (ssize)Generator.VariableCount - 1; ScanID > 0; ScanID--)
-    {
-        variable* Variable = GetVariable(ScanID);
-
-        if (AreStringsEqual(Variable->Name, Name))
-        {
-            ID = ScanID;
-            break;
-        }
-    }
-
-    return (ID);
-}
-
-local variable_id PushVariable(string Name)
-{
-    if (Generator.VariableCount == ArrayCount(Generator.Variables))
-    {
-        Println(StrLit("error: Too many variables (count exceeded 4096)"));
-        Exit(1);
-    }
-
-    variable_id ID = Generator.VariableCount++;
-    variable* Variable = GetVariable(ID);
-
-    if (Generator.StackOffset + 8 > S32Max)
-    {
-        Println(StrLit("error: Stack offset cannot be larger than S32Max"));
-        Exit(1);
-    }
-
-    Generator.StackOffset += 8;
-    Generator.StackSize = Maximum(Generator.StackSize, Generator.StackOffset);
-
-    Variable->Name = Name;
-    Variable->StackOffset = Generator.StackOffset;
-
-    return (ID);
-}
-
 local void GenerateNode(node_id NodeID);
 
 local void GenerateLValue(node_id NodeID)
@@ -221,45 +147,12 @@ local void GenerateLValue(node_id NodeID)
             Exit(1);
         } break;
 
-        case NODE_KIND_DECLARE:
+        case NODE_KIND_VARIABLE:
         {
-            variable_id ID = LookupVariable(Data.Declare.Name);
-
-            if (ID)
-            {
-                Println(StrLit("error: Variable with same name has already been declared"));
-                Exit(1);
-            }
-
-            ID = PushVariable(Data.Declare.Name);
-
-            variable* Variable = GetVariable(ID);
-
             // NOTE(vak):
             // 48 8d 85 (Disp32)    lea rax, [rbp + Disp32]
 
-            s32 Disp32 = -(s32)Variable->StackOffset;
-
-            Emit24(0x858d48);
-            Emit32(Disp32);
-        } break;
-
-        case NODE_KIND_IDENTIFIER:
-        {
-            variable_id ID = LookupVariable(Data.Identifier.Name);
-
-            if (!ID)
-            {
-                Println(StrLit("error: Undeclared/unknown variable."));
-                Exit(1);
-            }
-
-            variable* Variable = GetVariable(ID);
-
-            // NOTE(vak):
-            // 48 8d 85 (Disp32)    lea rax, [rbp + Disp32]
-
-            s32 Disp32 = -(s32)Variable->StackOffset;
+            s32 Disp32 = -(s32)Data.Variable.StackOffset;
 
             Emit24(0x858d48);
             Emit32(Disp32);
@@ -282,33 +175,12 @@ local void GenerateNode(node_id NodeID)
             Exit(1);
         } break;
 
-        case NODE_KIND_DECLARE:
-        {
-            variable_id ID = LookupVariable(Data.Declare.Name);
-
-            if (ID)
-            {
-                Println(StrLit("error: Variable with same name has already been declared"));
-                Exit(1);
-            }
-
-            PushVariable(Data.Declare.Name);
-        } break;
-
-        case NODE_KIND_STMT_LIST:
-        {
-            GenerateNode(Data.Block.First);
-        } break;
+        // TODO(vak): This is kinda stupid. We should remove StmtList
+        // soon.
 
         case NODE_KIND_BLOCK:
         {
-            usize SavedStackOffset = Generator.StackOffset;
-            usize SavedVariableCount = Generator.VariableCount;
-
             GenerateNode(Data.Block.First);
-
-            Generator.VariableCount = SavedVariableCount;
-            Generator.StackOffset = SavedStackOffset;
         } break;
 
         case NODE_KIND_IF:
@@ -570,7 +442,7 @@ local void GenerateNode(node_id NodeID)
             Emit64(Data.Integer.Value);
         } break;
 
-        case NODE_KIND_IDENTIFIER:
+        case NODE_KIND_VARIABLE:
         {
             GenerateLValue(NodeID);
 
@@ -819,12 +691,8 @@ local void GenerateNode(node_id NodeID)
 
 local code_buffer Generate(node_id RootNodeID)
 {
-    Generator.StackOffset = 0;
-    Generator.StackSize = 0;
-
     Generator.LabelCount = 1;
     Generator.Rel32Count = 0;
-    Generator.VariableCount = 1;
     Generator.BufferUsed = 0;
 
     Generator.ReturnLabel = PushLabel();
@@ -832,12 +700,32 @@ local code_buffer Generate(node_id RootNodeID)
     // NOTE(vak): Prologue
     // 55                   push rbp
     // 48 8b ec             mov rbp, rsp
-    // 48 81 ec (Imm32)     sub rsp, StackSize (imm32)
 
-    Emit56(0xec8148ec8b4855);
+    Emit32(0xec8b4855);
 
-    s32* WriteStackSize = (s32*)(Generator.Buffer + Generator.BufferUsed);
-    Emit32(0x00000000);
+    usize StackSize = GetStackSize();
+
+    StackSize = AlignUp(StackSize, 16);
+
+    if (StackSize == 0)
+    {
+    }
+    else if (StackSize <= S32Max)
+    {
+        // NOTE(vak):
+        // 48 81 ec (Imm32)     sub rsp, StackSize (imm32)
+        Emit24(0xec8148);
+        Emit32(StackSize);
+    }
+    else
+    {
+        // NOTE(vak):
+        // 48 b8 (Imm64)    mov rax, StackSize
+        // 48 2b e0         sub rsp, rax
+        Emit16(0xb848);
+        Emit64(StackSize);
+        Emit24(0xe02b48);
+    }
 
     // NOTE(vak): Body
 
@@ -850,18 +738,6 @@ local code_buffer Generate(node_id RootNodeID)
 
     PlaceLabelHere(Generator.ReturnLabel);
     Emit40(0xc35de58b48);
-
-    Generator.StackSize = AlignUp(Generator.StackSize, 16);
-
-    if (Generator.StackSize <= S32Max)
-    {
-        *WriteStackSize = (s32)Generator.StackSize;
-    }
-    else
-    {
-        Println(StrLit("error: stack size is larger than S32Max"));
-        Exit(1);
-    }
 
     for (usize Index = 0; Index < Generator.Rel32Count; Index++)
     {

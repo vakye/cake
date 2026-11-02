@@ -279,9 +279,17 @@ local void TestLoops(void)
     Println(StrLit("\033[34m== LOOPS ==\033[0m"));
     PrintNewLine();
 
-    TestCase(89, StrLit(
+    TestCase(10946, StrLit(
         "\n"
         "int Prev = 0, Curr = 1;\n"
+        "for (int I = 11; I < 30; ++I)\n"
+        "{\n"
+        "    if (I < 12) continue;\n"
+        "    if (I == 22) break;\n"
+        "    int New = Curr + Prev;\n"
+        "    Prev = Curr;\n"
+        "    Curr = New;\n"
+        "}\n"
         "for (int I = 11; I < 30; ++I)\n"
         "{\n"
         "    if (I < 12) continue;\n"
@@ -299,7 +307,7 @@ local void TestLoops(void)
         "int I = 0;\n"
         "while (I < 30)\n"
         "{\n"
-        "    I++;"
+        "    I++;\n"
         "    if (I < 10) continue;\n"
         "    if (I == 20) break;\n"
         "    int New = Curr + Prev;\n"
