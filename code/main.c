@@ -16,11 +16,16 @@ s32 Main(s32 ArgCount, char* Args[])
     TestBitwise();
     TestLogical();
     TestTernaryConditional();
-    TestPrefix();
     TestVariables();
+    TestAssignment();
+    TestPrefixPostfix();
     TestReturn();
+    TestComma();
     TestIf();
     TestLoops();
+
+    Println(StrLit("\033[34m== ALL TESTS PASSED ==\033[0m"));
+    PrintNewLine();
 
     return (0);
 }

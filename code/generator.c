@@ -513,6 +513,54 @@ local void GenerateNode(node_id NodeID)
             Emit8 (0xc0);
         } break;
 
+        case NODE_KIND_PRE_DEC:
+        {
+            GenerateLValue(Data.Unary.Operand);
+
+            // NOTE(vak):
+            // 48 ff 08     dec [rax]
+            // 48 8b 00     mov rax, [rax]
+
+            Emit48(0x008b4808ff48);
+        } break;
+
+        case NODE_KIND_PRE_INC:
+        {
+            GenerateLValue(Data.Unary.Operand);
+
+            // NOTE(vak):
+            // 48 ff 00     inc [rax]
+            // 48 8b 00     mov rax, [rax]
+
+            Emit48(0x008b4800ff48);
+        } break;
+
+        case NODE_KIND_POST_DEC:
+        {
+            GenerateLValue(Data.Unary.Operand);
+
+            // NOTE(vak):
+            // 48 8b 08     mov rcx, [rax]
+            // 48 ff 08     dec [rax]
+            // 48 8b c1     mov rax, rcx
+
+            Emit64(0x8b4808ff48088b48);
+            Emit8(0xc1);
+        } break;
+
+        case NODE_KIND_POST_INC:
+        {
+            GenerateLValue(Data.Unary.Operand);
+
+            // NOTE(vak):
+            // 48 8b 08     mov rcx, [rax]
+            // 48 ff 00     inc [rax]
+            // 48 8b c1     mov rax, rcx
+
+            Emit64(0x8b4800ff48088b48);
+            Emit8(0xc1);
+        } break;
+
         case NODE_KIND_INTEGER:
         {
             // NOTE(vak):

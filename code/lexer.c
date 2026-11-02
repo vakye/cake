@@ -23,6 +23,20 @@ typedef enum
     TOKEN_KIND_DOUBLE_AMPERSAND,    // NOTE(vak): "&&"
     TOKEN_KIND_DOUBLE_BAR,          // NOTE(vak): "||"
 
+    TOKEN_KIND_DOUBLE_PLUS,         // NOTE(vak): "++"
+    TOKEN_KIND_DOUBLE_MINUS,        // NOTE(vak): "--"
+
+    TOKEN_KIND_PLUS_EQUAL,          // NOTE(vak): "+="
+    TOKEN_KIND_MINUS_EQUAL,         // NOTE(vak): "-="
+    TOKEN_KIND_STAR_EQUAL,          // NOTE(vak): "*="
+    TOKEN_KIND_SLASH_EQUAL,         // NOTE(vak): "/="
+    TOKEN_KIND_PERCENT_EQUAL,       // NOTE(vak): "%="
+    TOKEN_KIND_AMPERSAND_EQUAL,     // NOTE(vak): "&="
+    TOKEN_KIND_HAT_EQUAL,           // NOTE(vak): "^="
+    TOKEN_KIND_BAR_EQUAL,           // NOTE(vak): "|="
+    TOKEN_KIND_DOUBLE_LT_EQUAL,     // NOTE(vak): "<<="
+    TOKEN_KIND_DOUBLE_GT_EQUAL,     // NOTE(vak): ">>="
+
     TOKEN_KIND_RETURN,              // NOTE(vak): "return"
     TOKEN_KIND_IF,                  // NOTE(vak): "if"
     TOKEN_KIND_ELSE,                // NOTE(vak): "else"
@@ -195,31 +209,64 @@ local usize TokenizePunctuation(usize Index)
     usize From = Index;
     usize Size = 1;
 
-    u16 TwoCharacters = Code.Data[Index + 0];
+    u32 ThreeChars = 0;
 
-    if (Index + 1 <= Code.Size)
-        TwoCharacters |= ((u16)Code.Data[Index + 1] << 8);
+    if (Index + 2 <= Code.Size) ThreeChars |= ((u32)Code.Data[Index + 2] << 16);
+    if (Index + 1 <= Code.Size) ThreeChars |= ((u32)Code.Data[Index + 1] <<  8);
 
-    token_kind Kind = (token_kind)(TwoCharacters & 0xFF);
+    ThreeChars |= ((u32)Code.Data[Index + 0] <<  0);
+
+    u32 TwoChars = ThreeChars & 0xFFFF;
+
+    token_kind Kind = TOKEN_KIND_EOF;
+
+    #define DoMatch3(A, B, C, K) \
+        else if (ThreeChars == (((u32)(C) << 16) | ((u32)(B) << 8) | (A))) \
+        { \
+            Kind = K; \
+            Size = 3; \
+        }
+
+    if (0) {}
+    DoMatch3('<', '<', '=', TOKEN_KIND_DOUBLE_LT_EQUAL)
+    DoMatch3('>', '>', '=', TOKEN_KIND_DOUBLE_GT_EQUAL)
+
+    #undef DoMatch3
 
     #define DoMatch2(A, B, K) \
-        else if (TwoCharacters == (((u16)(B) << 8) | (A))) \
+        else if (TwoChars == (((u32)(B) << 8) | (A))) \
         { \
             Kind = K; \
             Size = 2; \
         }
 
-    if (0) {}
-    DoMatch2('=', '=', TOKEN_KIND_DOUBLE_EQUAL)
-    DoMatch2('!', '=', TOKEN_KIND_BANG_EQUAL)
-    DoMatch2('<', '=', TOKEN_KIND_LT_EQUAL)
-    DoMatch2('>', '=', TOKEN_KIND_GT_EQUAL)
-    DoMatch2('<', '<', TOKEN_KIND_DOUBLE_LT)
-    DoMatch2('>', '>', TOKEN_KIND_DOUBLE_GT)
-    DoMatch2('&', '&', TOKEN_KIND_DOUBLE_AMPERSAND)
-    DoMatch2('|', '|', TOKEN_KIND_DOUBLE_BAR)
+    if (Kind == TOKEN_KIND_EOF)
+    {
+        if (0) {}
+        DoMatch2('=', '=', TOKEN_KIND_DOUBLE_EQUAL)
+        DoMatch2('!', '=', TOKEN_KIND_BANG_EQUAL)
+        DoMatch2('<', '=', TOKEN_KIND_LT_EQUAL)
+        DoMatch2('>', '=', TOKEN_KIND_GT_EQUAL)
+        DoMatch2('<', '<', TOKEN_KIND_DOUBLE_LT)
+        DoMatch2('>', '>', TOKEN_KIND_DOUBLE_GT)
+        DoMatch2('&', '&', TOKEN_KIND_DOUBLE_AMPERSAND)
+        DoMatch2('|', '|', TOKEN_KIND_DOUBLE_BAR)
+        DoMatch2('+', '+', TOKEN_KIND_DOUBLE_PLUS)
+        DoMatch2('-', '-', TOKEN_KIND_DOUBLE_MINUS)
+        DoMatch2('+', '=', TOKEN_KIND_PLUS_EQUAL)
+        DoMatch2('-', '=', TOKEN_KIND_MINUS_EQUAL)
+        DoMatch2('*', '=', TOKEN_KIND_STAR_EQUAL)
+        DoMatch2('/', '=', TOKEN_KIND_SLASH_EQUAL)
+        DoMatch2('%', '=', TOKEN_KIND_PERCENT_EQUAL)
+        DoMatch2('&', '=', TOKEN_KIND_AMPERSAND_EQUAL)
+        DoMatch2('^', '=', TOKEN_KIND_HAT_EQUAL)
+        DoMatch2('|', '=', TOKEN_KIND_BAR_EQUAL)
+    }
 
     #undef DoMatch2
+
+    if (Kind == TOKEN_KIND_EOF)
+        Kind = (token_kind)(TwoChars & 0xFF);
 
     PushToken(Kind, From, Size);
 

@@ -28,6 +28,10 @@ typedef enum
     NODE_KIND_NEGATE,           // NOTE(vak): Data: Unary
     NODE_KIND_LOGICAL_NOT,      // NOTE(vak): Data: Unary
     NODE_KIND_BITWISE_NOT,      // NOTE(vak): Data: Unary
+    NODE_KIND_PRE_DEC,          // NOTE(vak): Data: Unary
+    NODE_KIND_PRE_INC,          // NOTE(vak): Data: Unary
+    NODE_KIND_POST_DEC,         // NOTE(vak): Data: Unary
+    NODE_KIND_POST_INC,         // NOTE(vak): Data: Unary
 
     NODE_KIND_ADD,              // NOTE(vak): Data: Binary
     NODE_KIND_SUB,              // NOTE(vak): Data: Binary
@@ -85,6 +89,8 @@ local node_id Parse(void);
 local node_id ParseBlock(void);
 local node_id ParseStatement(void);
 local node_id ParseExpression(void);
+local node_id ParseExpressionNoComma(void);
+local node_id ParseComma(void);
 local node_id ParseAssignment(void);
 local node_id ParseTernaryConditional(void);
 local node_id ParseLogicalOr(void);
@@ -98,6 +104,7 @@ local node_id ParseShift(void);
 local node_id ParseSum(void);
 local node_id ParseFactor(void);
 local node_id ParsePrefix(void);
+local node_id ParsePostfix(void);
 local node_id ParsePrimary(void);
 
 local node_kind GetNodeKind(node_id NodeID);
@@ -423,7 +430,7 @@ local node_id ParseDecl(void)
 
             if (NextIfMatchToken('='))
             {
-                ParsedNode = PushBinaryNode(NODE_KIND_ASSIGN, ParsedNode, ParseExpression());
+                ParsedNode = PushBinaryNode(NODE_KIND_ASSIGN, ParsedNode, ParseExpressionNoComma());
             }
 
             if (!First)
@@ -549,7 +556,48 @@ local node_id ParseStatement(void)
 
 local node_id ParseExpression(void)
 {
+    node_id Node = ParseComma();
+    return (Node);
+}
+
+local node_id ParseExpressionNoComma(void)
+{
     node_id Node = ParseAssignment();
+    return (Node);
+}
+
+local node_id ParseComma(void)
+{
+    node_id First = 0;
+    node_id Last = 0;
+
+    do
+    {
+        node_id ParsedNode = ParseAssignment();
+
+        if (!First)
+        {
+            First = ParsedNode;
+            Last = ParsedNode;
+        }
+        else
+        {
+            node* LastNode = GetNode(Last);
+            LastNode->Data.Next = ParsedNode;
+            Last = ParsedNode;
+        }
+    } while (NextIfMatchToken(','));
+
+    node_id Node = 0;
+
+    if (First)
+    {
+        if (First == Last)
+            Node = First;
+        else
+            Node = PushStmtListNode(First);
+    }
+
     return (Node);
 }
 
@@ -557,8 +605,36 @@ local node_id ParseAssignment(void)
 {
     node_id NodeID = ParseTernaryConditional();
 
-    if (NextIfMatchToken('='))
+    node_kind OpKind = NODE_KIND_NIL;
+
+    switch (GetTokenKind(Parser.TokenIndex))
+    {
+        default: break;
+
+        case TOKEN_KIND_PLUS_EQUAL:         OpKind = NODE_KIND_ADD; break;
+        case TOKEN_KIND_MINUS_EQUAL:        OpKind = NODE_KIND_SUB; break;
+        case TOKEN_KIND_STAR_EQUAL:         OpKind = NODE_KIND_MUL; break;
+        case TOKEN_KIND_SLASH_EQUAL:        OpKind = NODE_KIND_DIV; break;
+        case TOKEN_KIND_PERCENT_EQUAL:      OpKind = NODE_KIND_MOD; break;
+        case TOKEN_KIND_AMPERSAND_EQUAL:    OpKind = NODE_KIND_BITWISE_AND; break;
+        case TOKEN_KIND_HAT_EQUAL:          OpKind = NODE_KIND_BITWISE_XOR; break;
+        case TOKEN_KIND_BAR_EQUAL:          OpKind = NODE_KIND_BITWISE_OR; break;
+        case TOKEN_KIND_DOUBLE_LT_EQUAL:    OpKind = NODE_KIND_SHIFT_LEFT; break;
+        case TOKEN_KIND_DOUBLE_GT_EQUAL:    OpKind = NODE_KIND_SHIFT_RIGHT; break;
+    }
+
+    if (OpKind != NODE_KIND_NIL)
+    {
+        NextToken();
+
+        node_id TargetNode = NodeID;
+        node_id OpNode = PushBinaryNode(OpKind, TargetNode, ParseAssignment());
+        NodeID = PushBinaryNode(NODE_KIND_ASSIGN, TargetNode, OpNode);
+    }
+    else if (NextIfMatchToken('='))
+    {
         NodeID = PushBinaryNode(NODE_KIND_ASSIGN, NodeID, ParseAssignment());
+    }
 
     return (NodeID);
 }
@@ -764,10 +840,31 @@ local node_id ParsePrefix(void)
         NodeID = PushUnaryNode(NODE_KIND_BITWISE_NOT, ParsePrefix());
     else if (NextIfMatchToken('!'))
         NodeID = PushUnaryNode(NODE_KIND_LOGICAL_NOT, ParsePrefix());
+    else if (NextIfMatchToken(TOKEN_KIND_DOUBLE_MINUS))
+        NodeID = PushUnaryNode(NODE_KIND_PRE_DEC, ParsePrefix());
+    else if (NextIfMatchToken(TOKEN_KIND_DOUBLE_PLUS))
+        NodeID = PushUnaryNode(NODE_KIND_PRE_INC, ParsePrefix());
     else
-        NodeID = ParsePrimary();
+        NodeID = ParsePostfix();
 
     return (NodeID);
+}
+
+local node_id ParsePostfix(void)
+{
+    node_id Node = ParsePrimary();
+
+    for (;;)
+    {
+        if (NextIfMatchToken(TOKEN_KIND_DOUBLE_MINUS))
+            Node = PushUnaryNode(NODE_KIND_POST_DEC, Node);
+        else if (NextIfMatchToken(TOKEN_KIND_DOUBLE_PLUS))
+            Node = PushUnaryNode(NODE_KIND_POST_INC, Node);
+        else
+            break;
+    }
+
+    return (Node);
 }
 
 local node_id ParsePrimary(void)
@@ -849,6 +946,13 @@ local void PrintNode(node_id NodeID)
         DoTable(NODE_KIND_STMT_LIST, "StmtList"),
         DoTable(NODE_KIND_INTEGER, "Integer"),
         DoTable(NODE_KIND_IDENTIFIER, "Identifier"),
+        DoTable(NODE_KIND_NEGATE, "Negate"),
+        DoTable(NODE_KIND_LOGICAL_NOT, "LogicalNot"),
+        DoTable(NODE_KIND_BITWISE_NOT, "BitwiseNot"),
+        DoTable(NODE_KIND_PRE_DEC, "PreDecrement"),
+        DoTable(NODE_KIND_PRE_INC, "PreIncrement"),
+        DoTable(NODE_KIND_POST_DEC, "PostDecrement"),
+        DoTable(NODE_KIND_POST_INC, "PostIncrement"),
         DoTable(NODE_KIND_ADD, "Add"),
         DoTable(NODE_KIND_SUB, "Sub"),
         DoTable(NODE_KIND_MUL, "Mul"),
@@ -952,6 +1056,10 @@ local void PrintNode(node_id NodeID)
         case NODE_KIND_NEGATE:
         case NODE_KIND_BITWISE_NOT:
         case NODE_KIND_LOGICAL_NOT:
+        case NODE_KIND_PRE_DEC:
+        case NODE_KIND_PRE_INC:
+        case NODE_KIND_POST_DEC:
+        case NODE_KIND_POST_INC:
         {
             PrintNewLine();
             PrintNode(Data.Unary.Operand);
