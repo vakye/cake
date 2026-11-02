@@ -17,7 +17,10 @@ typedef enum
     NODE_KIND_WHILE,            // NOTE(vak): Data: While
     NODE_KIND_DO_WHILE,         // NOTE(vak): Data: While
 
+    NODE_KIND_DECLARE,          // NOTE(vak): Data: Declare
+
     NODE_KIND_BLOCK,            // NOTE(vak): Data: Block
+    NODE_KIND_STMT_LIST,        // NOTE(vak): Data: Block
 
     NODE_KIND_INTEGER,          // NOTE(vak): Data: Integer
     NODE_KIND_IDENTIFIER,       // NOTE(vak): Data: Identifier
@@ -69,6 +72,7 @@ typedef struct
         struct { node_id Operand; }                 Unary;
         struct { node_id Left, Right; }             Binary;
         struct { node_id Left, Middle, Right; }     Ternary;
+        struct { string Name; }                     Declare;
         struct { node_id Cond, Then, Else; }        If;
         struct { node_id Init, Cond, Post, Body; }  For;
         struct { node_id Cond, Body; }              While;
@@ -207,6 +211,16 @@ local node_id PushTernaryNode(node_kind Kind, node_id Left, node_id Middle, node
     return (NodeID);
 }
 
+local node_id PushDeclareNode(string Name)
+{
+    node_id NodeID = PushNode(NODE_KIND_DECLARE);
+    node* Node = GetNode(NodeID);
+
+    Node->Data.Declare.Name = Name;
+
+    return (NodeID);
+}
+
 local node_id PushIfNode(node_id Cond, node_id Then, node_id Else)
 {
     node_id NodeID = PushNode(NODE_KIND_IF);
@@ -250,6 +264,16 @@ local node_id PushDoWhileNode(node_id Cond, node_id Body)
 
     Node->Data.While.Cond = Cond;
     Node->Data.While.Body = Body;
+
+    return (NodeID);
+}
+
+local node_id PushStmtListNode(node_id First)
+{
+    node_id NodeID = PushNode(NODE_KIND_STMT_LIST);
+    node* Node = GetNode(NodeID);
+
+    Node->Data.Block.First = First;
 
     return (NodeID);
 }
@@ -384,7 +408,35 @@ local node_id ParseStatement(void)
 {
     node_id Node = 0;
 
-    if (NextIfMatchToken(TOKEN_KIND_RETURN))
+    if (NextIfMatchToken(TOKEN_KIND_INT))
+    {
+        node_id First = 0;
+        node_id Last = 0;
+
+        do
+        {
+            ExpectToken(TOKEN_KIND_IDENTIFIER, StrLit("error: Invalid variable name"));
+            node_id DeclareNode = PushDeclareNode(GetTokenString(Parser.TokenIndex));
+            NextToken();
+
+            if (!First)
+            {
+                First = DeclareNode;
+                Last = DeclareNode;
+            }
+            else
+            {
+                node* LastNode = GetNode(Last);
+                LastNode->Data.Next = DeclareNode;
+                Last = DeclareNode;
+            }
+        } while (NextIfMatchToken(','));
+
+        Node = PushStmtListNode(First);
+
+        ParseExpectSkipSemicolon();
+    }
+    else if (NextIfMatchToken(TOKEN_KIND_RETURN))
     {
         Node = PushUnaryNode(NODE_KIND_RETURN, ParseExpression());
         ParseExpectSkipSemicolon();
@@ -762,6 +814,7 @@ local void PrintNode(node_id NodeID)
             [Kind] = {StringLit, sizeof(StringLit) - 1}
 
         DoTable(NODE_KIND_NIL, "Nil"),
+        DoTable(NODE_KIND_DECLARE, "Declare"),
         DoTable(NODE_KIND_RETURN, "Return"),
         DoTable(NODE_KIND_IF, "If"),
         DoTable(NODE_KIND_FOR, "For"),
@@ -770,6 +823,7 @@ local void PrintNode(node_id NodeID)
         DoTable(NODE_KIND_CONTINUE, "Continue"),
         DoTable(NODE_KIND_BREAK, "Break"),
         DoTable(NODE_KIND_BLOCK, "Block"),
+        DoTable(NODE_KIND_STMT_LIST, "StmtList"),
         DoTable(NODE_KIND_INTEGER, "Integer"),
         DoTable(NODE_KIND_IDENTIFIER, "Identifier"),
         DoTable(NODE_KIND_ADD, "Add"),
@@ -819,6 +873,12 @@ local void PrintNode(node_id NodeID)
             PrintNewLine();
         } break;
 
+        case NODE_KIND_DECLARE:
+        {
+            Print(Data.Declare.Name);
+            PrintNewLine();
+        } break;
+
         case NODE_KIND_IF:
         {
             PrintNewLine();
@@ -844,6 +904,7 @@ local void PrintNode(node_id NodeID)
             PrintNode(Data.While.Body);
         } break;
 
+        case NODE_KIND_STMT_LIST:
         case NODE_KIND_BLOCK:
         {
             PrintNewLine();

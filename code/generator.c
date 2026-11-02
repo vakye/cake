@@ -224,7 +224,10 @@ local void GenerateLValue(node_id NodeID)
             variable_id ID = LookupVariable(Data.Identifier.Name);
 
             if (!ID)
-                ID = PushVariable(Data.Identifier.Name);
+            {
+                Println(StrLit("error: Undeclared/unknown variable."));
+                Exit(1);
+            }
 
             variable* Variable = GetVariable(ID);
 
@@ -252,6 +255,24 @@ local void GenerateNode(node_id NodeID)
         {
             Println(StrLit("error: encountered nil node when generating"));
             Exit(1);
+        } break;
+
+        case NODE_KIND_DECLARE:
+        {
+            variable_id ID = LookupVariable(Data.Declare.Name);
+
+            if (ID)
+            {
+                Println(StrLit("error: Variable with same name has already been declared"));
+                Exit(1);
+            }
+
+            PushVariable(Data.Declare.Name);
+        } break;
+
+        case NODE_KIND_STMT_LIST:
+        {
+            GenerateNode(Data.Block.First);
         } break;
 
         case NODE_KIND_BLOCK:

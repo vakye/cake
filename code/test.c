@@ -166,33 +166,35 @@ local void TestPrefix(void)
 
 local void TestVariables(void)
 {
-    TestCase(12,    StrLit("a = 5; b = 7; a + b;"));
-    TestCase(-90,   StrLit("a = -(b = c = 10); a * b + c;"));
-    TestCase(64,    StrLit("Hello = 10; World = 123 + Hello; Hello*2 + World/3 % 79;"));
+    TestCase(12,    StrLit("int a, b; a = 5; b = 7; a + b;"));
+    TestCase(-90,   StrLit("int a, b, c; a = -(b = c = 10); a * b + c;"));
+    TestCase(64,    StrLit("int Hello, World; Hello = 10; World = 123 + Hello; Hello*2 + World/3 % 79;"));
 }
 
 local void TestReturn(void)
 {
-    TestCase(10,    StrLit("a = 10; b = 20; return a; b;"));
-    TestCase(30,    StrLit("a = 10; b = 20; return a + b; a - b;"));
+    TestCase(10,    StrLit("int a, b; a = 10; b = 20; return a; b;"));
+    TestCase(30,    StrLit("int a, b; a = 10; b = 20; return a + b; a - b;"));
 }
 
 local void TestIf(void)
 {
-    TestCase(50,    StrLit("a = 10; if (a < 20) { return 50; } else return 20;"));
-    TestCase(30,    StrLit("a = 10; if (a > 20) { return 50; } return 30;"));
-    TestCase(30,    StrLit("a = 10; if (a + 20 > 80) { return 10; } else if (a + 10 < 100) return 30; else return 20;"));
+    TestCase(50,    StrLit("int a; a = 10; if (a < 20) { return 50; } else return 20;"));
+    TestCase(30,    StrLit("int a; a = 10; if (a > 20) { return 50; } return 30;"));
+    TestCase(30,    StrLit("int a; a = 10; if (a + 20 > 80) { return 10; } else if (a + 10 < 100) return 30; else return 20;"));
 }
 
 local void TestLoops(void)
 {
     TestCase(89, StrLit(
+        "int Prev, Curr, I;"
         "Prev = 0;\n"
         "Curr = 1;\n"
         "for (I = 0; I < 30; I = I + 1)\n"
         "{\n"
         "    if (I < 10) continue;\n"
         "    if (I == 20) break;\n"
+        "    int New;"
         "    New = Curr + Prev;\n"
         "    Prev = Curr;\n"
         "    Curr = New;\n"
@@ -201,6 +203,7 @@ local void TestLoops(void)
     ));
 
     TestCase(144, StrLit(
+        "int Prev, Curr, I;"
         "Prev = 0;\n"
         "Curr = 1;\n"
         "I = 0;\n"
@@ -209,12 +212,14 @@ local void TestLoops(void)
         "    I = I + 1;\n"
         "    if (I < 10) continue;\n"
         "    if (I == 20) break;\n"
+        "    int New;"
         "    New = Curr + Prev;\n"
         "    Prev = Curr;\n"
         "    Curr = New;\n"
         "}\n"
         "do\n"
         "{\n"
+        "    int New;"
         "    New = Curr + Prev;\n"
         "    Prev = Curr;\n"
         "    Curr = New;\n"

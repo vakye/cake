@@ -31,6 +31,7 @@ typedef enum
     TOKEN_KIND_CONTINUE,            // NOTE(vak): "continue"
     TOKEN_KIND_WHILE,               // NOTE(vak): "while"
     TOKEN_KIND_DO,                  // NOTE(vak): "do"
+    TOKEN_KIND_INT,                 // NOTE(vak): "int"
 } token_kind;
 
 local void          Tokenize(string Code);
@@ -178,6 +179,7 @@ local usize TokenizeIdentifier(usize Index)
     DoMatch("continue", TOKEN_KIND_CONTINUE)
     DoMatch("while",    TOKEN_KIND_WHILE)
     DoMatch("do",       TOKEN_KIND_DO)
+    DoMatch("int",      TOKEN_KIND_INT)
 
     #undef DoMatch
 
