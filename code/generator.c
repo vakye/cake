@@ -46,6 +46,8 @@ typedef struct
     u32 StackOffset;
     u32 StackSize;
     label_id ReturnLabel;
+    label_id BreakLabel;
+    label_id ContinueLabel;
 
     usize BufferUsed;
     u32 LabelCount;
@@ -296,6 +298,72 @@ local void GenerateNode(node_id NodeID)
             {
                 PlaceLabelHere(ElseLabel);
             }
+        } break;
+
+        case NODE_KIND_FOR:
+        {
+            label_id OldContinueLabel = Generator.ContinueLabel;
+            label_id OldBreakLabel = Generator.BreakLabel;
+
+            label_id StartOfLoopLabel = PushLabel();
+
+            Generator.ContinueLabel = PushLabel();
+            Generator.BreakLabel = PushLabel();
+
+            GenerateNode(Data.For.Init);
+
+            PlaceLabelHere(StartOfLoopLabel);
+            GenerateNode(Data.For.Cond);
+
+            // NOTE(vak):
+            // 48 85 c0         test rax, rax
+            // 0f 84 (Rel32)    jz BreakLabel
+
+            Emit40(0x840fc08548);
+            EmitRel32(Generator.BreakLabel);
+
+            GenerateNode(Data.For.Body);
+
+            PlaceLabelHere(Generator.ContinueLabel);
+            GenerateNode(Data.For.Post);
+
+            // NOTE(vak):
+            // e9 (Rel32)       jmp StartOfLoopLabel
+            Emit8(0xe9);
+            EmitRel32(StartOfLoopLabel);
+
+            PlaceLabelHere(Generator.BreakLabel);
+
+            Generator.ContinueLabel = OldContinueLabel;
+            Generator.BreakLabel = OldBreakLabel;
+        } break;
+
+        case NODE_KIND_BREAK:
+        {
+            if (!Generator.BreakLabel)
+            {
+                Println(StrLit("error: Break statement outside loop"));
+                Exit(1);
+            }
+
+            // NOTE(vak):
+            // e9 (Rel32)       jmp BreakLabel
+            Emit8(0xe9);
+            EmitRel32(Generator.BreakLabel);
+        } break;
+
+        case NODE_KIND_CONTINUE:
+        {
+            if (!Generator.ContinueLabel)
+            {
+                Println(StrLit("error: Continue statement outside loop"));
+                Exit(1);
+            }
+
+            // NOTE(vak):
+            // e9 (Rel32)       jmp ContinueLabel
+            Emit8(0xe9);
+            EmitRel32(Generator.ContinueLabel);
         } break;
 
         case NODE_KIND_RETURN:

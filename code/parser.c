@@ -11,6 +11,9 @@ typedef enum
 
     NODE_KIND_RETURN,           // NOTE(vak): Data: Unary
     NODE_KIND_IF,               // NOTE(vak): Data: If
+    NODE_KIND_FOR,              // NOTE(vak): Data: For
+    NODE_KIND_BREAK,            // NOTE(vak): Data: None
+    NODE_KIND_CONTINUE,         // NOTE(vak): Data: None
 
     NODE_KIND_BLOCK,            // NOTE(vak): Data: Block
 
@@ -59,13 +62,14 @@ typedef struct
 
     union
     {
-        struct { usize Value; }                 Integer;
-        struct { string Name; }                 Identifier;
-        struct { node_id Operand; }             Unary;
-        struct { node_id Left, Right; }         Binary;
-        struct { node_id Left, Middle, Right; } Ternary;
-        struct { node_id Cond, Then, Else; }    If;
-        struct { node_id First; }               Block;
+        struct { usize Value; }                     Integer;
+        struct { string Name; }                     Identifier;
+        struct { node_id Operand; }                 Unary;
+        struct { node_id Left, Right; }             Binary;
+        struct { node_id Left, Middle, Right; }     Ternary;
+        struct { node_id Cond, Then, Else; }        If;
+        struct { node_id Init, Cond, Post, Body; }  For;
+        struct { node_id First; }                   Block;
     };
 } node_data;
 
@@ -213,6 +217,19 @@ local node_id PushIfNode(node_id Cond, node_id Then, node_id Else)
     return (NodeID);
 }
 
+local node_id PushForNode(node_id Init, node_id Cond, node_id Post, node_id Body)
+{
+    node_id NodeID = PushNode(NODE_KIND_FOR);
+    node* Node = GetNode(NodeID);
+
+    Node->Data.For.Init = Init;
+    Node->Data.For.Cond = Cond;
+    Node->Data.For.Post = Post;
+    Node->Data.For.Body = Body;
+
+    return (NodeID);
+}
+
 local node_id PushBlockNode(node_id First)
 {
     node_id NodeID = PushNode(NODE_KIND_BLOCK);
@@ -250,6 +267,24 @@ local b32 NextIfMatchToken(token_kind Kind)
     return (Result);
 }
 
+local void ExpectToken(token_kind Kind, string ErrorMessage)
+{
+    if (!MatchToken(Kind))
+    {
+        Println(ErrorMessage);
+        Exit(1);
+    }
+}
+
+local void ExpectAndSkipToken(token_kind Kind, string ErrorMessage)
+{
+    if (!NextIfMatchToken(Kind))
+    {
+        Println(ErrorMessage);
+        Exit(1);
+    }
+}
+
 local node_id Parse(void)
 {
     Parser.TokenIndex = 0;
@@ -282,11 +317,7 @@ local node_id Parse(void)
 
 local node_id ParseBlock(void)
 {
-    if (!NextIfMatchToken('{'))
-    {
-        Println(StrLit("error: Expected '{' at start of block."));
-        Exit(1);
-    }
+    ExpectAndSkipToken('{', StrLit("error: Expected '{' at start of block."));
 
     node_id First = 0;
     node_id Last = 0;
@@ -310,11 +341,7 @@ local node_id ParseBlock(void)
         }
     }
 
-    if (!NextIfMatchToken('}'))
-    {
-        Println(StrLit("error: Expected '}' at end of block."));
-        Exit(1);
-    }
+    ExpectAndSkipToken('}', StrLit("error: Expected '}' at end of block."));
 
     node_id Node = 0;
 
@@ -326,14 +353,7 @@ local node_id ParseBlock(void)
 
 local void ParseExpectSkipSemicolon(void)
 {
-    if (NextIfMatchToken(';'))
-    {
-    }
-    else
-    {
-        Println(StrLit("error: Syntax error"));
-        Exit(1);
-    }
+    ExpectAndSkipToken(';', StrLit("error: Syntax error"));
 }
 
 local node_id ParseStatement(void)
@@ -347,19 +367,11 @@ local node_id ParseStatement(void)
     }
     else if (NextIfMatchToken(TOKEN_KIND_IF))
     {
-        if (!NextIfMatchToken('('))
-        {
-            Println(StrLit("error: Expected '(' before 'if' condition."));
-            Exit(1);
-        }
+        ExpectAndSkipToken('(', StrLit("error: Expected '(' before 'if' condition"));
 
         node_id Cond = ParseExpression();
 
-        if (!NextIfMatchToken(')'))
-        {
-            Println(StrLit("error: Expected ')' after 'if' condition."));
-            Exit(1);
-        }
+        ExpectAndSkipToken(')', StrLit("error: Expected ')' after 'if' condition"));
 
         node_id Then = ParseStatement();
         node_id Else = 0;
@@ -368,6 +380,34 @@ local node_id ParseStatement(void)
             Else = ParseStatement();
 
         Node = PushIfNode(Cond, Then, Else);
+    }
+    else if (NextIfMatchToken(TOKEN_KIND_FOR))
+    {
+        ExpectAndSkipToken('(', StrLit("error: Expected '(' before for loop specifier"));
+
+        node_id Init = ParseExpression();
+
+        ExpectAndSkipToken(';', StrLit("error: Expected ';' after for loop initializer"));
+
+        node_id Cond = ParseExpression();
+
+        ExpectAndSkipToken(';', StrLit("error: Expected ';' after for loop condition"));
+
+        node_id Post = ParseExpression();
+
+        ExpectAndSkipToken(')', StrLit("error: Expected ')' after for loop specifier"));
+
+        node_id Body = ParseStatement();
+
+        Node = PushForNode(Init, Cond, Post, Body);
+    }
+    else if (NextIfMatchToken(TOKEN_KIND_BREAK))
+    {
+        Node = PushNode(NODE_KIND_BREAK);
+    }
+    else if (NextIfMatchToken(TOKEN_KIND_CONTINUE))
+    {
+        Node = PushNode(NODE_KIND_CONTINUE);
     }
     else if (MatchToken('{'))
     {
@@ -674,6 +714,9 @@ local void PrintNode(node_id NodeID)
         DoTable(NODE_KIND_NIL, "Nil"),
         DoTable(NODE_KIND_RETURN, "Return"),
         DoTable(NODE_KIND_IF, "If"),
+        DoTable(NODE_KIND_FOR, "For"),
+        DoTable(NODE_KIND_CONTINUE, "Continue"),
+        DoTable(NODE_KIND_BREAK, "Break"),
         DoTable(NODE_KIND_BLOCK, "Block"),
         DoTable(NODE_KIND_INTEGER, "Integer"),
         DoTable(NODE_KIND_IDENTIFIER, "Identifier"),
@@ -717,7 +760,12 @@ local void PrintNode(node_id NodeID)
 
     switch (Kind)
     {
-        case NODE_KIND_NIL: PrintNewLine(); break;
+        case NODE_KIND_BREAK:
+        case NODE_KIND_CONTINUE:
+        case NODE_KIND_NIL:
+        {
+            PrintNewLine();
+        } break;
 
         case NODE_KIND_IF:
         {
@@ -725,6 +773,15 @@ local void PrintNode(node_id NodeID)
             PrintNode(Data.If.Cond);
             PrintNode(Data.If.Then);
             PrintNode(Data.If.Else);
+        } break;
+
+        case NODE_KIND_FOR:
+        {
+            PrintNewLine();
+            PrintNode(Data.For.Init);
+            PrintNode(Data.For.Cond);
+            PrintNode(Data.For.Post);
+            PrintNode(Data.For.Body);
         } break;
 
         case NODE_KIND_BLOCK:

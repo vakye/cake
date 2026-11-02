@@ -26,6 +26,9 @@ typedef enum
     TOKEN_KIND_RETURN,              // NOTE(vak): "return"
     TOKEN_KIND_IF,                  // NOTE(vak): "if"
     TOKEN_KIND_ELSE,                // NOTE(vak): "else"
+    TOKEN_KIND_FOR,                 // NOTE(vak): "for"
+    TOKEN_KIND_BREAK,               // NOTE(vak): "break"
+    TOKEN_KIND_CONTINUE,            // NOTE(vak): "continue"
 } token_kind;
 
 local void          Tokenize(string Code);
@@ -168,6 +171,9 @@ local usize TokenizeIdentifier(usize Index)
     DoMatch("return",   TOKEN_KIND_RETURN)
     DoMatch("if",       TOKEN_KIND_IF)
     DoMatch("else",     TOKEN_KIND_ELSE)
+    DoMatch("for",      TOKEN_KIND_FOR)
+    DoMatch("break",    TOKEN_KIND_BREAK)
+    DoMatch("continue", TOKEN_KIND_CONTINUE)
 
     #undef DoMatch
 

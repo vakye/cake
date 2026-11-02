@@ -13,6 +13,7 @@ local void TestPrefix(void);
 local void TestVariables(void);
 local void TestReturn(void);
 local void TestIf(void);
+local void TestLoops(void);
 
 ///////////////////////////////////////////////////////////
 // NOTE(vak): Implementation
@@ -181,5 +182,22 @@ local void TestIf(void)
     TestCase(50,    StrLit("a = 10; if (a < 20) { return 50; } else return 20;"));
     TestCase(30,    StrLit("a = 10; if (a > 20) { return 50; } return 30;"));
     TestCase(30,    StrLit("a = 10; if (a + 20 > 80) { return 10; } else if (a + 10 < 100) return 30; else return 20;"));
+}
+
+local void TestLoops(void)
+{
+    TestCase(89, StrLit(
+        "Prev = 0;\n"
+        "Curr = 1;\n"
+        "for (I = 0; I < 30; I = I + 1)\n"
+        "{\n"
+        "    if (I < 10) continue;\n"
+        "    if (I == 20) break;\n"
+        "    New = Curr + Prev;\n"
+        "    Prev = Curr;\n"
+        "    Curr = New;\n"
+        "}\n"
+        "return Curr;"
+    ));
 }
 

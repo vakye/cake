@@ -20,6 +20,7 @@ s32 Main(s32 ArgCount, char* Args[])
     TestVariables();
     TestReturn();
     TestIf();
+    TestLoops();
 
     return (0);
 }
