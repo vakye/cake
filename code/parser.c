@@ -66,17 +66,18 @@ typedef u32 variable_id;
 
 typedef enum
 {
-    BUILTIN_TYPE_VOID = 0,
-    BUILTIN_TYPE_S64,
-} builtin_type;
+    SIGN_FLAG_SIGNED    = 0x01,
+    SIGN_FLAG_IGNORE    = 0x02,
+} sign_flags;
 
 typedef struct
 {
-    builtin_type T;
+    u32 Bits;
+    sign_flags SignFlags;
 } type_spec;
 
 local type_spec TypeSpecVoid = {0};
-local type_spec TypeSpecS64  = {.T = BUILTIN_TYPE_S64};
+local type_spec TypeSpecS32  = {.Bits = 32, .SignFlags = SIGN_FLAG_SIGNED};
 
 typedef struct
 {
@@ -198,7 +199,6 @@ local node_id PushIntegerNode(usize Value)
     node_id NodeID = PushNode(NODE_KIND_INTEGER);
     node* Node = GetNode(NodeID);
 
-    Node->Data.Type = TypeSpecS64;
     Node->Data.Integer.Value = Value;
 
     return (NodeID);
@@ -245,7 +245,9 @@ local variable_id DeclareVariable(string Name, type_spec Type)
     variable_id ID = Parser.VariableCount++;
     variable* Variable = GetVariable(ID);
 
-    Parser.StackOffset += GetTypeSize(Type);
+    usize Size = GetTypeSize(Type);
+
+    Parser.StackOffset += AlignUp(Size, 4);
     Parser.StackSize = Maximum(Parser.StackSize, Parser.StackOffset);
 
     Variable->Name = Name;
@@ -437,6 +439,223 @@ local void ExpectAndSkipToken(token_kind Kind, string ErrorMessage)
     }
 }
 
+local void DoTypeAnalysis(node_id NodeID)
+{
+    if (!NodeID) return;
+
+    node* Node = GetNode(NodeID);
+
+    type_spec* ThisType = &Node->Data.Type;
+
+    switch (Node->Kind)
+    {
+        default: break;
+
+        case NODE_KIND_RETURN:
+        {
+            DoTypeAnalysis(Node->Data.Unary.Operand);
+        } break;
+
+        case NODE_KIND_IF:
+        {
+            DoTypeAnalysis(Node->Data.If.Cond);
+            DoTypeAnalysis(Node->Data.If.Then);
+            DoTypeAnalysis(Node->Data.If.Else);
+        } break;
+
+        case NODE_KIND_FOR:
+        {
+            DoTypeAnalysis(Node->Data.For.Init);
+            DoTypeAnalysis(Node->Data.For.Cond);
+            DoTypeAnalysis(Node->Data.For.Post);
+            DoTypeAnalysis(Node->Data.For.Body);
+        } break;
+
+        case NODE_KIND_WHILE:
+        case NODE_KIND_DO_WHILE:
+        {
+            DoTypeAnalysis(Node->Data.While.Cond);
+            DoTypeAnalysis(Node->Data.While.Body);
+        } break;
+
+        case NODE_KIND_BLOCK:
+        {
+            DoTypeAnalysis(Node->Data.Block.First);
+        } break;
+
+        case NODE_KIND_INTEGER:
+        {
+            usize Value = Node->Data.Integer.Value;
+
+            usize BitsNeeded = 1;
+
+            while ((Value >> (BitsNeeded*2)) != 0)
+                BitsNeeded *= 2;
+
+            while ((Value >> BitsNeeded) != 0)
+                BitsNeeded++;
+
+            if (BitsNeeded <= 8)        ThisType->Bits = 8;
+            else if (BitsNeeded <= 16)  ThisType->Bits = 16;
+            else if (BitsNeeded <= 32)  ThisType->Bits = 32;
+            else                        ThisType->Bits = 64;
+
+            if (BitsNeeded < 64)
+                ThisType->SignFlags |= SIGN_FLAG_IGNORE;
+        } break;
+
+        // NOTE(vak): Variable node type already written in
+        // PushVariableNode(), so don't need to do it here.
+
+        case NODE_KIND_NEGATE:
+        {
+            node_id OperandID = Node->Data.Unary.Operand;
+
+            DoTypeAnalysis(OperandID);
+
+            node_data OperandData = GetNodeData(OperandID);
+            type_spec OperandType = OperandData.Type;
+
+            b32 IsUnsigned = ((OperandType.SignFlags & SIGN_FLAG_SIGNED) == 0);
+            b32 IgnoreSign = ((OperandType.SignFlags & SIGN_FLAG_IGNORE) != 0);
+
+            if (IsUnsigned && !IgnoreSign)
+            {
+                Println(StrLit("error: negating an unsigned value"));
+                Exit(1);
+            }
+
+            ThisType->SignFlags = SIGN_FLAG_SIGNED;
+            ThisType->Bits      = OperandType.Bits;
+        } break;
+
+        case NODE_KIND_BITWISE_NOT:
+        case NODE_KIND_PRE_DEC:
+        case NODE_KIND_PRE_INC:
+        case NODE_KIND_POST_DEC:
+        case NODE_KIND_POST_INC:
+        {
+            node_id OperandID = Node->Data.Unary.Operand;
+
+            DoTypeAnalysis(OperandID);
+
+            node_data OperandData = GetNodeData(OperandID);
+            type_spec OperandType = OperandData.Type;
+
+            ThisType->SignFlags = OperandType.SignFlags;
+            ThisType->Bits      = OperandType.Bits;
+        } break;
+
+        case NODE_KIND_LOGICAL_NOT:
+        {
+            node_id OperandID = Node->Data.Unary.Operand;
+
+            DoTypeAnalysis(OperandID);
+
+            ThisType->SignFlags = SIGN_FLAG_IGNORE;
+            ThisType->Bits      = 1;
+        } break;
+
+        case NODE_KIND_EQUAL:
+        case NODE_KIND_NOT_EQUAL:
+        case NODE_KIND_LT:
+        case NODE_KIND_LT_EQUAL:
+        case NODE_KIND_GT:
+        case NODE_KIND_GT_EQUAL:
+        case NODE_KIND_LOGICAL_AND:
+        case NODE_KIND_LOGICAL_OR:
+        {
+            node_id LeftID = Node->Data.Binary.Left;
+            node_id RightID = Node->Data.Binary.Right;
+
+            DoTypeAnalysis(LeftID);
+            DoTypeAnalysis(RightID);
+
+            ThisType->SignFlags = SIGN_FLAG_IGNORE;
+            ThisType->Bits      = 1;
+        } break;
+
+        case NODE_KIND_ADD:
+        case NODE_KIND_SUB:
+        case NODE_KIND_MUL:
+        case NODE_KIND_DIV:
+        case NODE_KIND_MOD:
+        case NODE_KIND_SHIFT_LEFT:
+        case NODE_KIND_SHIFT_RIGHT:
+        case NODE_KIND_BITWISE_AND:
+        case NODE_KIND_BITWISE_XOR:
+        case NODE_KIND_BITWISE_OR:
+        {
+            node_id LeftID = Node->Data.Binary.Left;
+            node_id RightID = Node->Data.Binary.Right;
+
+            DoTypeAnalysis(LeftID);
+            DoTypeAnalysis(RightID);
+
+            node_data LeftData = GetNodeData(LeftID);
+            node_data RightData = GetNodeData(RightID);
+
+            type_spec LeftType = LeftData.Type;
+            type_spec RightType = RightData.Type;
+
+            sign_flags Signed      = (LeftType.SignFlags | RightType.SignFlags) & SIGN_FLAG_SIGNED;
+            sign_flags IgnoreSign  = (LeftType.SignFlags & RightType.SignFlags) & SIGN_FLAG_IGNORE;
+
+            ThisType->SignFlags = Signed | IgnoreSign;
+            ThisType->Bits      = Maximum(LeftType.Bits, RightType.Bits);
+        } break;
+
+        case NODE_KIND_ASSIGN:
+        {
+            node_id LeftID = Node->Data.Binary.Left;
+            node_id RightID = Node->Data.Binary.Right;
+
+            DoTypeAnalysis(LeftID);
+            DoTypeAnalysis(RightID);
+
+            node_data LeftData = GetNodeData(LeftID);
+            node_data RightData = GetNodeData(LeftID);
+
+            type_spec LeftType = LeftData.Type;
+            type_spec RightType = RightData.Type;
+
+            if (GetTypeSize(RightType) > GetTypeSize(LeftType))
+            {
+                Println(StrLit("error: Variable type is not large enough to fit assignment value"));
+                Exit(1);
+            }
+
+            ThisType->SignFlags = LeftType.SignFlags;
+            ThisType->Bits      = LeftType.Bits;
+        } break;
+
+        case NODE_KIND_TERNARY_CONDITIONAL:
+        {
+            node_id LeftID = Node->Data.Ternary.Left;
+            node_id MiddleID = Node->Data.Ternary.Middle;
+            node_id RightID = Node->Data.Ternary.Right;
+
+            DoTypeAnalysis(LeftID);
+            DoTypeAnalysis(MiddleID);
+            DoTypeAnalysis(RightID);
+
+            node_data MiddleData = GetNodeData(MiddleID);
+            node_data RightData = GetNodeData(RightID);
+
+            type_spec MiddleType = MiddleData.Type;
+            type_spec RightType = RightData.Type;
+
+            sign_flags Signed      = (MiddleType.SignFlags | RightType.SignFlags) & SIGN_FLAG_SIGNED;
+            sign_flags IgnoreSign  = (MiddleType.SignFlags & RightType.SignFlags) & SIGN_FLAG_IGNORE;
+
+            ThisType->SignFlags = Signed | IgnoreSign;
+            ThisType->Bits      = Maximum(MiddleType.Bits, RightType.Bits);
+        } break;
+    }
+
+    DoTypeAnalysis(Node->Data.Next);
+}
+
 local node_id Parse(void)
 {
     Parser.StackOffset = 0;
@@ -467,6 +686,8 @@ local node_id Parse(void)
             Last = Node;
         }
     }
+
+    DoTypeAnalysis(First);
 
     return (First);
 }
@@ -538,7 +759,7 @@ local node_id ParseDecl(void)
                 Exit(1);
             }
 
-            VariableID = DeclareVariable(Name, TypeSpecS64);
+            VariableID = DeclareVariable(Name, TypeSpecS32);
 
             node_id AssignNode = 0;
 
@@ -1223,19 +1444,7 @@ local usize GetStackSize(void)
 
 local usize GetTypeSize(type_spec Type)
 {
-    usize Result = 0;
-
-    switch (Type.T)
-    {
-        default:
-        {
-            Println(StrLit("error: Cannot get size of type"));
-            Exit(1);
-        } break;
-
-        case BUILTIN_TYPE_S64: Result = 8; break;
-    }
-
+    usize Result = (Type.Bits + 7) / 8;
     return (Result);
 }
 

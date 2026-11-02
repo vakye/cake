@@ -160,6 +160,99 @@ local void GenerateLValue(node_id NodeID)
     }
 }
 
+// rax = Type [rax]
+local void GenerateLoad(type_spec Type)
+{
+    b32 IsUnsigned = ((Type.SignFlags & SIGN_FLAG_SIGNED) == 0);
+    b32 IgnoreSign = ((Type.SignFlags & SIGN_FLAG_IGNORE) != 0);
+
+    b32 SignedLoad = (!IsUnsigned && !IgnoreSign);
+
+    switch (Type.Bits)
+    {
+        default:
+        {
+            Println(StrLit("error: cannot generate load due to invalid type bits"));
+            Exit(1);
+        } break;
+
+        case 8:
+        {
+            // NOTE(vak):
+            // Signed   : 48 0f be 00   movsx rax, byte [rax]
+            // Unsigned : 0f b6 00      movzx eax, byte [rax]
+            if (SignedLoad) Emit32(0x00be0f48);
+            else            Emit24(0x00b60f);
+        } break;
+
+        case 16:
+        {
+            // NOTE(vak):
+            // Signed   : 48 0f bf 00   movsx rax, word [rax]
+            // Unsigned : 0f b7 00      movzx eax, word [rax]
+            if (SignedLoad) Emit32(0x00bf0f48);
+            else            Emit24(0x00b70f);
+        } break;
+
+        case 32:
+        {
+            // NOTE(vak):
+            // Signed   : 48 63 00  movsxd rax, dword [rax]
+            // Unsigned : 8b 00     mov eax, dword [rax]
+            if (SignedLoad) Emit24(0x006348);
+            else            Emit16(0x008b);
+        } break;
+
+        case 64:
+        {
+            // NOTE(vak):
+            // 48 8b 00     mov rax, [rax]
+            Emit24(0x008b48);
+        } break;
+    }
+}
+
+// NOTE(vak): [rcx] = (Type)rax
+local void GenerateStore(type_spec Type)
+{
+    switch (Type.Bits)
+    {
+        default:
+        {
+            Println(StrLit("error: cannot generate store due to invalid type bits"));
+            Exit(1);
+        } break;
+
+        case 8:
+        {
+            // NOTE(vak):
+            // 88 01 mov byte [rcx], al
+            Emit16(0x0188);
+        } break;
+
+        case 16:
+        {
+            // NOTE(vak):
+            // 66 89 01 mov word [rcx], ax
+            Emit24(0x018966);
+        } break;
+
+        case 32:
+        {
+            // NOTE(vak):
+            // 89 01 mov dword [rcx], eax
+            Emit16(0x0189);
+        } break;
+
+        case 64:
+        {
+            // NOTE(vak):
+            // 48 89 01 mov qword [rcx], rax
+            Emit24(0x018948);
+        } break;
+    }
+}
+
 local void GenerateNode(node_id NodeID)
 {
     if (!NodeID) return;
@@ -174,9 +267,6 @@ local void GenerateNode(node_id NodeID)
             Println(StrLit("error: encountered nil node when generating"));
             Exit(1);
         } break;
-
-        // TODO(vak): This is kinda stupid. We should remove StmtList
-        // soon.
 
         case NODE_KIND_BLOCK:
         {
@@ -389,48 +479,74 @@ local void GenerateNode(node_id NodeID)
         {
             GenerateLValue(Data.Unary.Operand);
 
-            // NOTE(vak):
-            // 48 ff 08     dec [rax]
-            // 48 8b 00     mov rax, [rax]
+            Emit8(0x50); // NOTE(vak): 50 push rax
 
-            Emit48(0x008b4808ff48);
+            GenerateLoad(Data.Type);
+
+            // NOTE(vak):
+            // 59       pop rcx
+            // 48 ff c8 dec rax
+            Emit32(0xc8ff4859);
+
+            GenerateStore(Data.Type);
         } break;
 
         case NODE_KIND_PRE_INC:
         {
             GenerateLValue(Data.Unary.Operand);
 
-            // NOTE(vak):
-            // 48 ff 00     inc [rax]
-            // 48 8b 00     mov rax, [rax]
+            Emit8(0x50); // NOTE(vak): 50 push rax
 
-            Emit48(0x008b4800ff48);
+            GenerateLoad(Data.Type);
+
+            // NOTE(vak):
+            // 59       pop rcx
+            // 48 ff c0 inc rax
+            Emit32(0xc0ff4859);
+
+            GenerateStore(Data.Type);
         } break;
 
         case NODE_KIND_POST_DEC:
         {
             GenerateLValue(Data.Unary.Operand);
 
-            // NOTE(vak):
-            // 48 8b 08     mov rcx, [rax]
-            // 48 ff 08     dec [rax]
-            // 48 8b c1     mov rax, rcx
+            Emit8(0x50); // NOTE(vak): 50 push rax
 
-            Emit64(0x8b4808ff48088b48);
-            Emit8(0xc1);
+            GenerateLoad(Data.Type);
+
+            // NOTE(vak):
+            // 59       pop rcx
+            // 50       push rax
+            // 48 ff c8 dec rax
+            Emit40(0xc8ff485059);
+
+            GenerateStore(Data.Type);
+
+            // NOTE(vak):
+            // 58       pop rax
+            Emit8(0x58);
         } break;
 
         case NODE_KIND_POST_INC:
         {
             GenerateLValue(Data.Unary.Operand);
 
-            // NOTE(vak):
-            // 48 8b 08     mov rcx, [rax]
-            // 48 ff 00     inc [rax]
-            // 48 8b c1     mov rax, rcx
+            Emit8(0x50); // NOTE(vak): 50 push rax
 
-            Emit64(0x8b4800ff48088b48);
-            Emit8(0xc1);
+            GenerateLoad(Data.Type);
+
+            // NOTE(vak):
+            // 59       pop rcx
+            // 50       push rax
+            // 48 ff c0 inc rax
+            Emit40(0xc0ff485059);
+
+            GenerateStore(Data.Type);
+
+            // NOTE(vak):
+            // 58       pop rax
+            Emit8(0x58);
         } break;
 
         case NODE_KIND_INTEGER:
@@ -445,10 +561,7 @@ local void GenerateNode(node_id NodeID)
         case NODE_KIND_VARIABLE:
         {
             GenerateLValue(NodeID);
-
-            // NOTE(vak):
-            // 48 8b 00     mov rax, [rax]
-            Emit24(0x008b48);
+            GenerateLoad(Data.Type);
         } break;
 
         case NODE_KIND_ADD:
@@ -674,9 +787,9 @@ local void GenerateNode(node_id NodeID)
             GenerateNode(Data.Binary.Right);
             Emit8(0x59); // NOTE(vak): 59 pop rcx
 
-            // NOTE(vak):
-            // 48 89 01     mov [rcx], rax
-            Emit24(0x018948);
+            node_data LeftData = GetNodeData(Data.Binary.Left);
+
+            GenerateStore(LeftData.Type);
         } break;
     }
 
