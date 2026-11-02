@@ -206,6 +206,8 @@ local variable_id PushVariable(string Name)
     return (ID);
 }
 
+local void GenerateNode(node_id NodeID);
+
 local void GenerateLValue(node_id NodeID)
 {
     node_kind Kind = GetNodeKind(NodeID);
@@ -217,6 +219,29 @@ local void GenerateLValue(node_id NodeID)
         {
             Println(StrLit("error: not an l-value"));
             Exit(1);
+        } break;
+
+        case NODE_KIND_DECLARE:
+        {
+            variable_id ID = LookupVariable(Data.Declare.Name);
+
+            if (ID)
+            {
+                Println(StrLit("error: Variable with same name has already been declared"));
+                Exit(1);
+            }
+
+            ID = PushVariable(Data.Declare.Name);
+
+            variable* Variable = GetVariable(ID);
+
+            // NOTE(vak):
+            // 48 8d 85 (Disp32)    lea rax, [rbp + Disp32]
+
+            s32 Disp32 = -(s32)Variable->StackOffset;
+
+            Emit24(0x858d48);
+            Emit32(Disp32);
         } break;
 
         case NODE_KIND_IDENTIFIER:

@@ -404,7 +404,7 @@ local void ParseExpectSkipSemicolon(void)
     ExpectAndSkipToken(';', StrLit("error: Syntax error"));
 }
 
-local node_id ParseStatement(void)
+local node_id ParseDecl(void)
 {
     node_id Node = 0;
 
@@ -416,25 +416,44 @@ local node_id ParseStatement(void)
         do
         {
             ExpectToken(TOKEN_KIND_IDENTIFIER, StrLit("error: Invalid variable name"));
-            node_id DeclareNode = PushDeclareNode(GetTokenString(Parser.TokenIndex));
+
+            node_id ParsedNode = PushDeclareNode(GetTokenString(Parser.TokenIndex));
+
             NextToken();
+
+            if (NextIfMatchToken('='))
+            {
+                ParsedNode = PushBinaryNode(NODE_KIND_ASSIGN, ParsedNode, ParseExpression());
+            }
 
             if (!First)
             {
-                First = DeclareNode;
-                Last = DeclareNode;
+                First = ParsedNode;
+                Last = ParsedNode;
             }
             else
             {
                 node* LastNode = GetNode(Last);
-                LastNode->Data.Next = DeclareNode;
-                Last = DeclareNode;
+                LastNode->Data.Next = ParsedNode;
+                Last = ParsedNode;
             }
         } while (NextIfMatchToken(','));
 
         Node = PushStmtListNode(First);
 
         ParseExpectSkipSemicolon();
+    }
+
+    return (Node);
+}
+
+local node_id ParseStatement(void)
+{
+    node_id Node = 0;
+
+    if (MatchToken(TOKEN_KIND_INT))
+    {
+        Node = ParseDecl();
     }
     else if (NextIfMatchToken(TOKEN_KIND_RETURN))
     {
@@ -461,9 +480,13 @@ local node_id ParseStatement(void)
     {
         ExpectAndSkipToken('(', StrLit("error: Expected '(' before for loop specifier"));
 
-        node_id Init = ParseExpression();
+        node_id Init = ParseDecl();
 
-        ExpectAndSkipToken(';', StrLit("error: Expected ';' after for loop initializer"));
+        if (!Init)
+        {
+            Init = ParseExpression();
+            ExpectAndSkipToken(';', StrLit("error: Expected ';' after for loop initializer"));
+        }
 
         node_id Cond = ParseExpression();
 
