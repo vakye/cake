@@ -338,6 +338,66 @@ local void GenerateNode(node_id NodeID)
             Generator.BreakLabel = OldBreakLabel;
         } break;
 
+        case NODE_KIND_WHILE:
+        {
+            label_id OldContinueLabel = Generator.ContinueLabel;
+            label_id OldBreakLabel = Generator.BreakLabel;
+
+            Generator.ContinueLabel = PushLabel();
+            Generator.BreakLabel = PushLabel();
+
+            PlaceLabelHere(Generator.ContinueLabel);
+            GenerateNode(Data.While.Cond);
+
+            // NOTE(vak):
+            // 48 85 c0         test rax, rax
+            // 0f 84 (Rel32)    jz BreakLabel
+
+            Emit40(0x840fc08548);
+            EmitRel32(Generator.BreakLabel);
+
+            GenerateNode(Data.While.Body);
+
+            // NOTE(vak):
+            // e9 (Rel32)       jmp ContinueLabel
+            Emit8(0xe9);
+            EmitRel32(Generator.ContinueLabel);
+
+            PlaceLabelHere(Generator.BreakLabel);
+
+            Generator.ContinueLabel = OldContinueLabel;
+            Generator.BreakLabel = OldBreakLabel;
+        } break;
+
+        case NODE_KIND_DO_WHILE:
+        {
+            label_id OldContinueLabel = Generator.ContinueLabel;
+            label_id OldBreakLabel = Generator.BreakLabel;
+
+            label_id StartOfLoopLabel = PushLabel();
+
+            Generator.ContinueLabel = PushLabel();
+            Generator.BreakLabel = PushLabel();
+
+            PlaceLabelHere(StartOfLoopLabel);
+            GenerateNode(Data.While.Body);
+
+            PlaceLabelHere(Generator.ContinueLabel);
+            GenerateNode(Data.While.Cond);
+
+            // NOTE(vak):
+            // 48 85 c0         test rax, rax
+            // 0f 85 (Rel32)    jnz StartOfLoopLabel
+
+            Emit40(0x850fc08548);
+            EmitRel32(StartOfLoopLabel);
+
+            PlaceLabelHere(Generator.BreakLabel);
+
+            Generator.ContinueLabel = OldContinueLabel;
+            Generator.BreakLabel = OldBreakLabel;
+        } break;
+
         case NODE_KIND_BREAK:
         {
             if (!Generator.BreakLabel)

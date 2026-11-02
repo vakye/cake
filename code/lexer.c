@@ -29,6 +29,8 @@ typedef enum
     TOKEN_KIND_FOR,                 // NOTE(vak): "for"
     TOKEN_KIND_BREAK,               // NOTE(vak): "break"
     TOKEN_KIND_CONTINUE,            // NOTE(vak): "continue"
+    TOKEN_KIND_WHILE,               // NOTE(vak): "while"
+    TOKEN_KIND_DO,                  // NOTE(vak): "do"
 } token_kind;
 
 local void          Tokenize(string Code);
@@ -174,6 +176,8 @@ local usize TokenizeIdentifier(usize Index)
     DoMatch("for",      TOKEN_KIND_FOR)
     DoMatch("break",    TOKEN_KIND_BREAK)
     DoMatch("continue", TOKEN_KIND_CONTINUE)
+    DoMatch("while",    TOKEN_KIND_WHILE)
+    DoMatch("do",       TOKEN_KIND_DO)
 
     #undef DoMatch
 

@@ -14,6 +14,8 @@ typedef enum
     NODE_KIND_FOR,              // NOTE(vak): Data: For
     NODE_KIND_BREAK,            // NOTE(vak): Data: None
     NODE_KIND_CONTINUE,         // NOTE(vak): Data: None
+    NODE_KIND_WHILE,            // NOTE(vak): Data: While
+    NODE_KIND_DO_WHILE,         // NOTE(vak): Data: While
 
     NODE_KIND_BLOCK,            // NOTE(vak): Data: Block
 
@@ -69,6 +71,7 @@ typedef struct
         struct { node_id Left, Middle, Right; }     Ternary;
         struct { node_id Cond, Then, Else; }        If;
         struct { node_id Init, Cond, Post, Body; }  For;
+        struct { node_id Cond, Body; }              While;
         struct { node_id First; }                   Block;
     };
 } node_data;
@@ -171,7 +174,6 @@ local node_id PushIdentifierNode(string Name)
     return (NodeID);
 }
 
-
 local node_id PushUnaryNode(node_kind Kind, node_id Operand)
 {
     node_id NodeID = PushNode(Kind);
@@ -226,6 +228,28 @@ local node_id PushForNode(node_id Init, node_id Cond, node_id Post, node_id Body
     Node->Data.For.Cond = Cond;
     Node->Data.For.Post = Post;
     Node->Data.For.Body = Body;
+
+    return (NodeID);
+}
+
+local node_id PushWhileNode(node_id Cond, node_id Body)
+{
+    node_id NodeID = PushNode(NODE_KIND_WHILE);
+    node* Node = GetNode(NodeID);
+
+    Node->Data.While.Cond = Cond;
+    Node->Data.While.Body = Body;
+
+    return (NodeID);
+}
+
+local node_id PushDoWhileNode(node_id Cond, node_id Body)
+{
+    node_id NodeID = PushNode(NODE_KIND_DO_WHILE);
+    node* Node = GetNode(NodeID);
+
+    Node->Data.While.Cond = Cond;
+    Node->Data.While.Body = Body;
 
     return (NodeID);
 }
@@ -400,6 +424,32 @@ local node_id ParseStatement(void)
         node_id Body = ParseStatement();
 
         Node = PushForNode(Init, Cond, Post, Body);
+    }
+    else if (NextIfMatchToken(TOKEN_KIND_WHILE))
+    {
+        ExpectAndSkipToken('(', StrLit("error: Expected '(' before while loop condition"));
+
+        node_id Cond = ParseExpression();
+
+        ExpectAndSkipToken(')', StrLit("error: Expected ')' after while loop condition"));
+
+        node_id Body = ParseStatement();
+
+        Node = PushWhileNode(Cond, Body);
+    }
+    else if (NextIfMatchToken(TOKEN_KIND_DO))
+    {
+        node_id Body = ParseStatement();
+
+        ExpectAndSkipToken(TOKEN_KIND_WHILE, StrLit("error: Missing 'while' in do-while loop"));
+        ExpectAndSkipToken('(', StrLit("error: Expected '(' before do-while loop condition"));
+
+        node_id Cond = ParseExpression();
+
+        ExpectAndSkipToken(')', StrLit("error: Expected ')' after do-while loop condition"));
+        ParseExpectSkipSemicolon();
+
+        Node = PushDoWhileNode(Cond, Body);
     }
     else if (NextIfMatchToken(TOKEN_KIND_BREAK))
     {
@@ -715,6 +765,8 @@ local void PrintNode(node_id NodeID)
         DoTable(NODE_KIND_RETURN, "Return"),
         DoTable(NODE_KIND_IF, "If"),
         DoTable(NODE_KIND_FOR, "For"),
+        DoTable(NODE_KIND_WHILE, "While"),
+        DoTable(NODE_KIND_DO_WHILE, "DoWhile"),
         DoTable(NODE_KIND_CONTINUE, "Continue"),
         DoTable(NODE_KIND_BREAK, "Break"),
         DoTable(NODE_KIND_BLOCK, "Block"),
@@ -782,6 +834,14 @@ local void PrintNode(node_id NodeID)
             PrintNode(Data.For.Cond);
             PrintNode(Data.For.Post);
             PrintNode(Data.For.Body);
+        } break;
+
+        case NODE_KIND_WHILE:
+        case NODE_KIND_DO_WHILE:
+        {
+            PrintNewLine();
+            PrintNode(Data.While.Cond);
+            PrintNode(Data.While.Body);
         } break;
 
         case NODE_KIND_BLOCK:
