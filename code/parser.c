@@ -59,15 +59,29 @@ typedef enum
 } node_kind;
 
 typedef u32 node_id;
-
 #define NIL_NODE_ID (0)
 
 typedef u32 variable_id;
 #define NIL_VARIABLE_ID (0)
 
+typedef enum
+{
+    BUILTIN_TYPE_VOID = 0,
+    BUILTIN_TYPE_S64,
+} builtin_type;
+
+typedef struct
+{
+    builtin_type T;
+} type_spec;
+
+local type_spec TypeSpecVoid = {0};
+local type_spec TypeSpecS64  = {.T = BUILTIN_TYPE_S64};
+
 typedef struct
 {
     node_id Next;
+    type_spec Type;
 
     union
     {
@@ -84,6 +98,45 @@ typedef struct
 } node_data;
 
 local node_id Parse(void);
+
+local node_kind GetNodeKind(node_id NodeID);
+local node_data GetNodeData(node_id NodeID);
+local void PrintNode(node_id NodeID);
+
+local usize GetStackSize(void);
+local usize GetTypeSize(type_spec Type);
+
+///////////////////////////////////////////////////////////
+// NOTE(vak): Implementation
+///////////////////////////////////////////////////////////
+
+typedef struct
+{
+    node_kind Kind;
+    node_data Data;
+} node;
+
+typedef struct
+{
+    string Name;
+    type_spec Type;
+    usize StackOffset;
+} variable;
+
+typedef struct
+{
+    usize StackOffset;
+    usize StackSize;
+
+    u32 TokenIndex;
+    u32 NodeCount;
+    u32 VariableCount;
+
+    node Nodes[4096];
+    variable Variables[4096];
+} parser_state;
+
+local parser_state Parser = {0};
 
 local node_id ParseBlock(void);
 local node_id ParseStatement(void);
@@ -105,44 +158,6 @@ local node_id ParseFactor(void);
 local node_id ParsePrefix(void);
 local node_id ParsePostfix(void);
 local node_id ParsePrimary(void);
-
-local node_kind GetNodeKind(node_id NodeID);
-local node_data GetNodeData(node_id NodeID);
-
-local usize GetStackSize(void);
-
-local void PrintNode(node_id NodeID);
-
-///////////////////////////////////////////////////////////
-// NOTE(vak): Implementation
-///////////////////////////////////////////////////////////
-
-typedef struct
-{
-    node_kind Kind;
-    node_data Data;
-} node;
-
-typedef struct
-{
-    string Name;
-    usize StackOffset;
-} variable;
-
-typedef struct
-{
-    usize StackOffset;
-    usize StackSize;
-
-    u32 TokenIndex;
-    u32 NodeCount;
-    u32 VariableCount;
-
-    node Nodes[4096];
-    variable Variables[4096];
-} parser_state;
-
-local parser_state Parser = {0};
 
 local node* GetNode(node_id NodeID)
 {
@@ -183,6 +198,7 @@ local node_id PushIntegerNode(usize Value)
     node_id NodeID = PushNode(NODE_KIND_INTEGER);
     node* Node = GetNode(NodeID);
 
+    Node->Data.Type = TypeSpecS64;
     Node->Data.Integer.Value = Value;
 
     return (NodeID);
@@ -218,7 +234,7 @@ local variable_id LookupVariable(string Name)
     return (ID);
 }
 
-local variable_id DeclareVariable(string Name)
+local variable_id DeclareVariable(string Name, type_spec Type)
 {
     if (Parser.VariableCount == ArrayCount(Parser.Variables))
     {
@@ -229,10 +245,11 @@ local variable_id DeclareVariable(string Name)
     variable_id ID = Parser.VariableCount++;
     variable* Variable = GetVariable(ID);
 
-    Parser.StackOffset += 8;
+    Parser.StackOffset += GetTypeSize(Type);
     Parser.StackSize = Maximum(Parser.StackSize, Parser.StackOffset);
 
     Variable->Name = Name;
+    Variable->Type = Type;
     Variable->StackOffset = Parser.StackOffset;
 
     return (ID);
@@ -268,6 +285,7 @@ local node_id PushVariableNode(variable_id ID)
 
     variable* Variable = GetVariable(ID);
 
+    Node->Data.Type = Variable->Type;
     Node->Data.Variable.StackOffset = Variable->StackOffset;
 
     return (NodeID);
@@ -520,7 +538,7 @@ local node_id ParseDecl(void)
                 Exit(1);
             }
 
-            VariableID = DeclareVariable(Name);
+            VariableID = DeclareVariable(Name, TypeSpecS64);
 
             node_id AssignNode = 0;
 
@@ -1019,11 +1037,6 @@ local node_data GetNodeData(node_id NodeID)
     return (Node->Data);
 }
 
-local usize GetStackSize(void)
-{
-    return (Parser.StackSize);
-}
-
 local void PrintNode(node_id NodeID)
 {
     if (!NodeID) return;
@@ -1201,5 +1214,28 @@ local void PrintNode(node_id NodeID)
     Depth--;
 
     PrintNode(Data.Next);
+}
+
+local usize GetStackSize(void)
+{
+    return (Parser.StackSize);
+}
+
+local usize GetTypeSize(type_spec Type)
+{
+    usize Result = 0;
+
+    switch (Type.T)
+    {
+        default:
+        {
+            Println(StrLit("error: Cannot get size of type"));
+            Exit(1);
+        } break;
+
+        case BUILTIN_TYPE_S64: Result = 8; break;
+    }
+
+    return (Result);
 }
 
