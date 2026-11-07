@@ -16,6 +16,7 @@ local void TestReturn(void);
 local void TestComma(void);
 local void TestIf(void);
 local void TestLoops(void);
+local void TestTypes(void);
 
 ///////////////////////////////////////////////////////////
 // NOTE(vak): Implementation
@@ -322,6 +323,23 @@ local void TestLoops(void)
         "} while (I < 20);\n"
         "return Curr;"
     ));
+
+    PrintNewLine();
+}
+
+local void TestTypes(void)
+{
+    Println(StrLit("\033[34m== TYPES ==\033[0m"));
+    PrintNewLine();
+
+    TestCase(6, StrLit("int char a = 1; char int b = 2; char c = 3; a + b + c;"));
+    TestCase(6, StrLit("int short a = 1; short int b = 2; short c = 3; a + b + c;"));
+    TestCase(6, StrLit("int a = 1; int b = 2; int c = 3; a + b + c;"));
+    TestCase(6, StrLit("long long int a = 1; int long long b = 2; long long c = 3; a + b + c;"));
+    TestCase(0, StrLit("int char a = 255; char int b = 1; return a + b;"));
+    TestCase(-127, StrLit("char a = 128; char b = 1; return a + b;"));
+    TestCase(-32767, StrLit("short int a = 32768; int short b = 1; return a + b;"));
+    TestCase(0, StrLit("long long a = 18446744073709551615; int b = 1; return a + b;"));
 
     PrintNewLine();
 }

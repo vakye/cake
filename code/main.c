@@ -23,6 +23,7 @@ s32 Main(s32 ArgCount, char* Args[])
     TestComma();
     TestIf();
     TestLoops();
+    TestTypes();
 
     Println(StrLit("\033[34m== ALL TESTS PASSED ==\033[0m"));
     PrintNewLine();

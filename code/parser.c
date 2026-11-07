@@ -77,7 +77,10 @@ typedef struct
 } type_spec;
 
 local type_spec TypeSpecVoid = {0};
+local type_spec TypeSpecS8   = {.Bits = 8,  .SignFlags = SIGN_FLAG_SIGNED};
+local type_spec TypeSpecS16  = {.Bits = 16, .SignFlags = SIGN_FLAG_SIGNED};
 local type_spec TypeSpecS32  = {.Bits = 32, .SignFlags = SIGN_FLAG_SIGNED};
+local type_spec TypeSpecS64  = {.Bits = 64, .SignFlags = SIGN_FLAG_SIGNED};
 
 typedef struct
 {
@@ -421,22 +424,22 @@ local b32 NextIfMatchToken(token_kind Kind)
     return (Result);
 }
 
+local void ParserError(string Message)
+{
+    Println(Message);
+    Exit(1);
+}
+
 local void ExpectToken(token_kind Kind, string ErrorMessage)
 {
     if (!MatchToken(Kind))
-    {
-        Println(ErrorMessage);
-        Exit(1);
-    }
+        ParserError(ErrorMessage);
 }
 
 local void ExpectAndSkipToken(token_kind Kind, string ErrorMessage)
 {
     if (!NextIfMatchToken(Kind))
-    {
-        Println(ErrorMessage);
-        Exit(1);
-    }
+        ParserError(ErrorMessage);
 }
 
 local void DoTypeAnalysis(node_id NodeID)
@@ -487,13 +490,13 @@ local void DoTypeAnalysis(node_id NodeID)
         {
             usize Value = Node->Data.Integer.Value;
 
-            usize BitsNeeded = 1;
+            usize BitsNeeded = 0;
 
-            while ((Value >> (BitsNeeded*2)) != 0)
-                BitsNeeded *= 2;
-
-            while ((Value >> BitsNeeded) != 0)
-                BitsNeeded++;
+            while (Value)
+            {
+                BitsNeeded += 1;
+                Value >>= 1;
+            }
 
             if (BitsNeeded <= 8)        ThisType->Bits = 8;
             else if (BitsNeeded <= 16)  ThisType->Bits = 16;
@@ -738,7 +741,45 @@ local node_id ParseDecl(void)
 {
     node_id Node = 0;
 
-    if (NextIfMatchToken(TOKEN_KIND_INT))
+    type_spec Type = {0};
+
+    u32 IntCount    = 0;
+    u32 ShortCount  = 0;
+    u32 CharCount   = 0;
+    u32 LongCount   = 0;
+
+    for (;;)
+    {
+        if (NextIfMatchToken(TOKEN_KIND_INT))
+            IntCount++;
+        else if (NextIfMatchToken(TOKEN_KIND_SHORT))
+            ShortCount++;
+        else if (NextIfMatchToken(TOKEN_KIND_CHAR))
+            CharCount++;
+        else if (NextIfMatchToken(TOKEN_KIND_LONG))
+            LongCount++;
+        else
+            break;
+    }
+
+    if ((IntCount <= 1) && (CharCount == 1) && (ShortCount == 0) && (LongCount == 0))
+        Type = TypeSpecS8;
+    if ((IntCount <= 1) && (CharCount == 0) && (ShortCount == 1) && (LongCount == 0))
+        Type = TypeSpecS16;
+    if ((IntCount == 1) && (CharCount == 0) && (ShortCount == 0) && (LongCount == 0))
+        Type = TypeSpecS32;
+    if ((IntCount <= 1) && (CharCount == 0) && (ShortCount == 0) && (LongCount == 1))
+        Type = TypeSpecS64;
+    if ((IntCount <= 1) && (CharCount == 0) && (ShortCount == 0) && (LongCount == 2))
+        Type = TypeSpecS64;
+
+    if ((IntCount > 0) || (CharCount > 0) || (ShortCount > 0) || (LongCount > 0))
+    {
+        if (!Type.Bits)
+            ParserError(StrLit("error: invalid type"));
+    }
+
+    if (Type.Bits != 0)
     {
         node_id First = 0;
         node_id Last = 0;
@@ -759,7 +800,7 @@ local node_id ParseDecl(void)
                 Exit(1);
             }
 
-            VariableID = DeclareVariable(Name, TypeSpecS32);
+            VariableID = DeclareVariable(Name, Type);
 
             node_id AssignNode = 0;
 
@@ -795,11 +836,12 @@ local node_id ParseDecl(void)
 
 local node_id ParseStatement(void)
 {
-    node_id Node = 0;
+    node_id Node = ParseDecl();
 
-    if (MatchToken(TOKEN_KIND_INT))
+    if (Node)
     {
-        Node = ParseDecl();
+        // NOTE(vak): Declaration parsed so skip everything
+        // else.
     }
     else if (NextIfMatchToken(TOKEN_KIND_RETURN))
     {
